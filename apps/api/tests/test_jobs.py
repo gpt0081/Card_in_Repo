@@ -25,6 +25,7 @@ def test_memory_queue_preserves_fifo_and_requires_ack():
 
     first_delivery = queue.claim()
     assert first_delivery is not None and first_delivery.job == first
+    assert first_delivery.attempts == 1
     queue.ack(first_delivery)
     second_delivery = queue.claim()
     assert second_delivery is not None and second_delivery.job == second
@@ -32,15 +33,27 @@ def test_memory_queue_preserves_fifo_and_requires_ack():
     assert queue.claim() is None
 
 
-def test_unacked_memory_delivery_can_be_redelivered_after_worker_loss():
+def test_unacked_memory_delivery_increments_attempt_on_redelivery():
     queue = MemoryAnalysisJobQueue()
     job = AnalysisJob("a1", "https://github.com/octo/one")
     queue.enqueue(job)
     abandoned = queue.claim()
-    assert abandoned is not None and abandoned.job == job
+    assert abandoned is not None and abandoned.attempts == 1
 
     queue.redeliver_pending()
     redelivery = queue.claim()
     assert redelivery is not None
     assert redelivery.job == job
     assert redelivery.delivery_id != abandoned.delivery_id
+    assert redelivery.attempts == 2
+
+
+def test_memory_queue_dead_letter_removes_pending_delivery():
+    queue = MemoryAnalysisJobQueue()
+    job = AnalysisJob("a1", "https://github.com/octo/one")
+    queue.enqueue(job)
+    delivery = queue.claim()
+    assert delivery is not None
+    queue.dead_letter(delivery, "exhausted")
+    assert queue.claim() is None
+    assert queue.dead_letters == ((job, 1, "exhausted"),)
