@@ -30,10 +30,12 @@ def test_long_function_splits_between_statements_not_arbitrary_lines():
     symbol = _function(source)
     segments = split_python_symbol(source, symbol, max_lines=5)
 
+    # Pack as much syntax as possible without exceeding max_lines. The second
+    # assignment and return fit exactly in five lines, so an extra card would
+    # add navigation cost without preserving any additional syntax boundary.
     assert segments == [
-        {"start_line": 1, "end_line": 5, "index": 0, "count": 3},
-        {"start_line": 6, "end_line": 9, "index": 1, "count": 3},
-        {"start_line": 10, "end_line": 10, "index": 2, "count": 3},
+        {"start_line": 1, "end_line": 5, "index": 0, "count": 2},
+        {"start_line": 6, "end_line": 10, "index": 1, "count": 2},
     ]
 
 
