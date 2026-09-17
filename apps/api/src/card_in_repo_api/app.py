@@ -7,7 +7,7 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from card_in_repo_analyzer import analyze_python, analyze_python_repository, build_feature_map
+from card_in_repo_analyzer import analyze_python, analyze_python_repository, build_feature_map, split_python_symbol
 from .github_source import GitHubSourceError, resolve_github_repository
 
 app = FastAPI(title="Card in Repo API", version="0.1.0")
@@ -39,20 +39,63 @@ def _store_analysis(repository: str, commit_sha: str, files: dict[str, str], fac
     cards: list[dict[str, Any]] = []
     symbols = {symbol["id"]: symbol for symbol in facts["symbols"]}
     symbol_paths = facts.get("symbol_paths", {symbol_id: next(iter(files)) for symbol_id in symbols})
+
     for feature in features:
         for step in feature["flow_steps"]:
             symbol = symbols[step["symbol_id"]]
             path = symbol_paths[symbol["id"]]
             source = files[path]
-            start = symbol["range"]["start"]["line"]
-            end = symbol["range"]["end"]["line"]
-            excerpt = "\n".join(source.splitlines()[start - 1 : end])
-            evidence_id = f"evidence:{sha256((commit_sha + path + str(start) + str(end)).encode()).hexdigest()[:16]}"
-            card_id = f"card:{sha256((analysis_id + symbol['id']).encode()).hexdigest()[:16]}"
-            card = {"id": card_id, "analysis_id": analysis_id, "repository": repository, "commit_sha": commit_sha, "path": path, "symbol_id": symbol["id"], "symbol_name": symbol["name"], "range": symbol["range"], "source": excerpt, "basic_explanation": {"status": "STUB_VERIFIED", "summary": f"This card covers the {symbol['name']} function.", "evidence_ids": [evidence_id]}, "evidence": [{"id": evidence_id, "type": "SOURCE_RANGE", "path": path, "range": symbol["range"]}]}
-            _CARDS[card_id] = card
-            cards.append(card)
-    _ANALYSES[analysis_id] = {"id": analysis_id, "state": "READY", "repository": repository, "commit_sha": commit_sha, "facts": facts, "features": features, "card_ids": [card["id"] for card in cards]}
+            segments = split_python_symbol(source, symbol)
+            for segment_index, segment in enumerate(segments):
+                start = segment["start_line"]
+                end = segment["end_line"]
+                excerpt = "\n".join(source.splitlines()[start - 1 : end])
+                evidence_id = f"evidence:{sha256((commit_sha + path + str(start) + str(end)).encode()).hexdigest()[:16]}"
+                card_id = f"card:{sha256((analysis_id + symbol['id'] + str(segment_index)).encode()).hexdigest()[:16]}"
+                card_range = {
+                    "start": {"line": start},
+                    "end": {"line": end},
+                }
+                card = {
+                    "id": card_id,
+                    "analysis_id": analysis_id,
+                    "repository": repository,
+                    "commit_sha": commit_sha,
+                    "path": path,
+                    "symbol_id": symbol["id"],
+                    "symbol_name": symbol["name"],
+                    "range": card_range,
+                    "parent_symbol_range": symbol["range"],
+                    "segment": {
+                        "index": segment_index,
+                        "count": len(segments),
+                        "previous_card_id": None,
+                        "next_card_id": None,
+                    },
+                    "source": excerpt,
+                    "basic_explanation": {
+                        "status": "STUB_VERIFIED",
+                        "summary": f"This card covers {symbol['name']} segment {segment_index + 1} of {len(segments)}.",
+                        "evidence_ids": [evidence_id],
+                    },
+                    "evidence": [{"id": evidence_id, "type": "SOURCE_RANGE", "path": path, "range": card_range}],
+                }
+                if cards and cards[-1]["symbol_id"] == symbol["id"]:
+                    previous = cards[-1]
+                    card["segment"]["previous_card_id"] = previous["id"]
+                    previous["segment"]["next_card_id"] = card_id
+                _CARDS[card_id] = card
+                cards.append(card)
+
+    _ANALYSES[analysis_id] = {
+        "id": analysis_id,
+        "state": "READY",
+        "repository": repository,
+        "commit_sha": commit_sha,
+        "facts": facts,
+        "features": features,
+        "card_ids": [card["id"] for card in cards],
+    }
     return {"id": analysis_id, "state": "READY", "card_ids": [card["id"] for card in cards]}
 
 
