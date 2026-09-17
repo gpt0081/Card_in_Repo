@@ -84,8 +84,6 @@ def _store_analysis(repository: str, commit_sha: str, files: dict[str, str], fac
                     card["segment"]["previous_card_id"] = previous["id"]
                     previous["segment"]["next_card_id"] = card_id
                 symbol_cards.append(card)
-            for card in symbol_cards:
-                _STORE.put_card(card)
             cards.extend(symbol_cards)
 
     analysis = {
@@ -97,7 +95,10 @@ def _store_analysis(repository: str, commit_sha: str, files: dict[str, str], fac
         "features": features,
         "card_ids": [card["id"] for card in cards],
     }
+    # Persist the parent snapshot first so durable stores may enforce card -> analysis referential integrity.
     _STORE.put_analysis(analysis)
+    for card in cards:
+        _STORE.put_card(card)
     return {"id": analysis_id, "state": "READY", "card_ids": analysis["card_ids"]}
 
 
