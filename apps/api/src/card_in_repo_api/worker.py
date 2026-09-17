@@ -9,13 +9,20 @@ from .runtime import build_analysis_queue
 
 
 def run_one(queue: AnalysisJobQueue | None = None, timeout_seconds: int = 5) -> bool:
-    """Process one queued analysis. Returns False when no job was available."""
+    """Process one claimed analysis; acknowledge only after a durable outcome is stored."""
     queue = queue or build_analysis_queue()
-    job = queue.dequeue(timeout_seconds)
-    if job is None:
+    delivery = queue.claim(timeout_seconds)
+    if delivery is None:
         return False
+    job = delivery.job
     current = _STORE.get_analysis(job.analysis_id)
     if current is None:
+        # The request no longer exists, so replaying it cannot make useful progress.
+        queue.ack(delivery)
+        return True
+    if current.get("state") == "READY":
+        # Redelivery after a crash between persistence and ACK is idempotent.
+        queue.ack(delivery)
         return True
     try:
         _STORE.put_analysis({**current, "state": "RESOLVING"})
@@ -26,10 +33,15 @@ def run_one(queue: AnalysisJobQueue | None = None, timeout_seconds: int = 5) -> 
     except GitHubSourceError as exc:
         latest = _STORE.get_analysis(job.analysis_id) or current
         _STORE.put_analysis({**latest, "state": "FAILED_TERMINAL", "error": str(exc)})
+        queue.ack(delivery)
+        return True
     except Exception:
         latest = _STORE.get_analysis(job.analysis_id) or current
         _STORE.put_analysis({**latest, "state": "FAILED_RETRYABLE", "error": "analysis worker failed"})
+        # Deliberately leave the delivery pending. Redis XAUTOCLAIM can transfer it
+        # to a healthy worker after the lease expires.
         raise
+    queue.ack(delivery)
     return True
 
 
