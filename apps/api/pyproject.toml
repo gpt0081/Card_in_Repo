@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "card-in-repo-api"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["fastapi>=0.115,<1"]
+dependencies = ["fastapi>=0.115,<1", "psycopg[binary]>=3.2,<4"]
 
 [project.optional-dependencies]
 test = ["httpx>=0.27,<1", "pytest>=8,<9", "tree-sitter>=0.25,<0.26", "tree-sitter-python>=0.25,<0.26"]
