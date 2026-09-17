@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from hashlib import sha256
 from typing import Any
 
 from tree_sitter import Language, Parser
 import tree_sitter_python
 
-ANALYZER_VERSION = "python-tree-sitter-v0.1.0"
+ANALYZER_VERSION = "python-tree-sitter-v0.1.1"
 
 
 def _point(node: Any, which: str) -> dict[str, int]:
@@ -67,15 +68,27 @@ def analyze_python(path: str, source_text: str) -> dict[str, Any]:
 
     visit(tree.root_node)
 
-    by_name = {symbol["name"]: symbol["id"] for symbol in symbols}
+    candidates: dict[str, list[str]] = defaultdict(list)
+    for symbol in symbols:
+        candidates[symbol["name"]].append(symbol["id"])
+
     lines = source_text.splitlines()
     for symbol in symbols:
         start_line = symbol["range"]["start"]["line"]
         symbol["is_async"] = bool(lines) and lines[start_line - 1].lstrip().startswith("async def ")
+
     for call in calls:
         callee = call["callee"]
-        if callee.isidentifier() and callee in by_name:
-            call["resolved_target_id"] = by_name[callee]
+        matches = candidates.get(callee, []) if callee.isidentifier() else []
+        if len(matches) == 1:
+            call["resolved_target_id"] = matches[0]
+        elif len(matches) > 1:
+            warnings.append({
+                "code": "AMBIGUOUS_CALL_TARGET",
+                "callee": callee,
+                "range": call["range"],
+                "candidate_target_ids": matches,
+            })
 
     return {
         "schema_version": 1,
