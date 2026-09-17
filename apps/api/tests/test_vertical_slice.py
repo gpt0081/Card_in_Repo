@@ -31,6 +31,7 @@ def test_fixture_analysis_reaches_ready_feature_map_and_evidence_card():
     assert payload["commit_sha"] == "a" * 40
     assert payload["basic_explanation"]["status"] == "STUB_VERIFIED"
     assert payload["basic_explanation"]["evidence_ids"] == [payload["evidence"][0]["id"]]
+    assert payload["segment"]["count"] == 1
 
 
 def test_fixture_analysis_rejects_unsupported_language():
@@ -56,3 +57,19 @@ def test_public_github_analysis_uses_repository_snapshot_and_cross_file_flow(mon
     assert [step["symbol_name"] for step in entry["flow_steps"]] == ["entry", "load_user"]
     cards = [client.get(f"/v1/cards/{card_id}").json() for card_id in payload["card_ids"]]
     assert {card["path"] for card in cards} == {"app.py", "services/user.py"}
+
+
+def test_long_function_cards_are_syntax_aligned_and_linked():
+    statements = [f"    value_{index} = {index}" for index in range(45)]
+    source = "def long_job():\n" + "\n".join(statements) + "\n    return value_44\n"
+    response = client.post("/v1/fixture-analyses", json={"repository": "fixture/long", "commit_sha": "d" * 40, "path": "long.py", "source": source})
+    assert response.status_code == 201
+    card_ids = response.json()["card_ids"]
+    cards = [client.get(f"/v1/cards/{card_id}").json() for card_id in card_ids]
+    long_cards = [card for card in cards if card["symbol_name"] == "long_job"]
+    assert len(long_cards) == 2
+    assert long_cards[0]["segment"] == {"index": 0, "count": 2, "previous_card_id": None, "next_card_id": long_cards[1]["id"]}
+    assert long_cards[1]["segment"] == {"index": 1, "count": 2, "previous_card_id": long_cards[0]["id"], "next_card_id": None}
+    assert long_cards[0]["range"]["end"]["line"] < long_cards[1]["range"]["start"]["line"]
+    assert long_cards[0]["evidence"][0]["range"] == long_cards[0]["range"]
+    assert long_cards[1]["evidence"][0]["range"] == long_cards[1]["range"]
