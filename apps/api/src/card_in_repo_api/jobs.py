@@ -85,14 +85,17 @@ class RedisAnalysisJobQueue:
     GROUP = "analysis-workers-v1"
     STALE_MS = 60_000
 
-    def __init__(self, redis_url: str) -> None:
+    def __init__(self, redis_url: str, *, consumer_id: str | None = None, stale_ms: int | None = None) -> None:
         if not redis_url:
             raise ValueError("redis_url is required")
+        if stale_ms is not None and stale_ms < 0:
+            raise ValueError("stale_ms must be non-negative")
         from redis import Redis
         from redis.exceptions import ResponseError
 
         self._redis = Redis.from_url(redis_url, decode_responses=True)
-        self._consumer = os.getenv("CARD_IN_REPO_WORKER_ID") or f"worker-{os.getpid()}"
+        self._consumer = consumer_id or os.getenv("CARD_IN_REPO_WORKER_ID") or f"worker-{os.getpid()}"
+        self._stale_ms = self.STALE_MS if stale_ms is None else stale_ms
         try:
             self._redis.xgroup_create(self.KEY, self.GROUP, id="0", mkstream=True)
         except ResponseError as exc:
@@ -112,7 +115,7 @@ class RedisAnalysisJobQueue:
         # Recover one abandoned delivery before waiting for new work. XAUTOCLAIM makes
         # a worker crash recoverable without destructively removing the job first.
         _next, stale, _deleted = self._redis.xautoclaim(
-            self.KEY, self.GROUP, self._consumer, self.STALE_MS, start_id="0-0", count=1
+            self.KEY, self.GROUP, self._consumer, self._stale_ms, start_id="0-0", count=1
         )
         if stale:
             message_id, fields = stale[0]
