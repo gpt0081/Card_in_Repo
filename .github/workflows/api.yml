@@ -8,6 +8,22 @@ on:
 jobs:
   vertical-slice:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: card_in_repo
+          POSTGRES_PASSWORD: card_in_repo
+          POSTGRES_DB: card_in_repo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U card_in_repo -d card_in_repo_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://card_in_repo:card_in_repo@localhost:5432/card_in_repo_test
     defaults:
       run:
         working-directory: apps/api
