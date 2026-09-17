@@ -9,14 +9,15 @@ from pydantic import BaseModel
 
 from card_in_repo_analyzer import analyze_python, analyze_python_repository, build_feature_map, split_python_symbol
 from .github_source import GitHubSourceError, resolve_github_repository
-from .store import AnalysisStore, MemoryAnalysisStore
+from .runtime import build_analysis_store
+from .store import AnalysisStore
 
 app = FastAPI(title="Card in Repo API", version="0.1.0")
-_STORE: AnalysisStore = MemoryAnalysisStore()
+_STORE: AnalysisStore = build_analysis_store()
 
 
 def set_store(store: AnalysisStore) -> None:
-    """Bind a store at the application composition boundary."""
+    """Override the store at the application composition boundary, primarily for tests."""
     global _STORE
     _STORE = store
 
@@ -95,7 +96,6 @@ def _store_analysis(repository: str, commit_sha: str, files: dict[str, str], fac
         "features": features,
         "card_ids": [card["id"] for card in cards],
     }
-    # Persist the parent snapshot first so durable stores may enforce card -> analysis referential integrity.
     _STORE.put_analysis(analysis)
     for card in cards:
         _STORE.put_card(card)
