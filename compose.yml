@@ -45,6 +45,44 @@ services:
       timeout: 3s
       retries: 10
 
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      CARD_IN_REPO_STORE: postgres
+      DATABASE_URL: postgresql://card_in_repo:card_in_repo@postgres:5432/card_in_repo
+      CARD_IN_REPO_QUEUE: redis
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["python", "-m", "card_in_repo_api.worker"]
+    environment:
+      CARD_IN_REPO_STORE: postgres
+      DATABASE_URL: postgresql://card_in_repo:card_in_repo@postgres:5432/card_in_repo
+      CARD_IN_REPO_QUEUE: redis
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres-data:
   redis-data:
