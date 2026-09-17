@@ -1,0 +1,14 @@
+name: runtime-stack
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose model
+        run: docker compose -f compose.yml config --quiet

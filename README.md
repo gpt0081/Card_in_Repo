@@ -61,8 +61,30 @@ Postgres Redis  Object Storage
                  - verification
 ```
 
+## Local dependencies
+
+Docker Compose provides the MVP persistence/queue/blob dependencies with pinned major/release images:
+
+```bash
+docker compose up -d
+```
+
+This starts PostgreSQL 16 with pgvector on `localhost:5432`, Redis 7 on `localhost:6379`, and the S3-compatible object store on `localhost:9000` (console `9001`). The credentials in `compose.yml` are development-only.
+
+To run the API against persistent PostgreSQL instead of its deterministic in-memory test store:
+
+```bash
+export CARD_IN_REPO_STORE=postgres
+export DATABASE_URL=postgresql://card_in_repo:card_in_repo@localhost:5432/card_in_repo
+cd apps/api
+python -m pip install -e '.[test]'
+uvicorn card_in_repo_api.app:app --reload
+```
+
+Use `docker compose down` to stop dependencies, or `docker compose down -v` when you intentionally want to erase local persisted data.
+
 Detailed architecture, data model, analysis pipeline, learning system, and implementation plan live under `docs/` as they are implemented.
 
 ## Status
 
-Bootstrap phase. The repository is intentionally starting with the product contract and an executable vertical-slice plan before framework scaffolding is added.
+Backend core prototype. Public GitHub repositories can be commit-pinned, Python source can be analyzed across files, feature/flow maps and evidence-backed card shells can be produced, long functions can be split at syntax boundaries, and analysis/card snapshots have PostgreSQL persistence support. The mobile PWA, JavaScript/TypeScript analyzer, asynchronous Redis worker path, object-storage integration, GitHub login, and real LLM teaching/verification pipeline are still pending.
