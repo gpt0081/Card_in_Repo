@@ -9,10 +9,16 @@ from pydantic import BaseModel
 
 from card_in_repo_analyzer import analyze_python, analyze_python_repository, build_feature_map, split_python_symbol
 from .github_source import GitHubSourceError, resolve_github_repository
+from .store import AnalysisStore, MemoryAnalysisStore
 
 app = FastAPI(title="Card in Repo API", version="0.1.0")
-_ANALYSES: dict[str, dict[str, Any]] = {}
-_CARDS: dict[str, dict[str, Any]] = {}
+_STORE: AnalysisStore = MemoryAnalysisStore()
+
+
+def set_store(store: AnalysisStore) -> None:
+    """Bind a store at the application composition boundary."""
+    global _STORE
+    _STORE = store
 
 
 class FixtureAnalysisRequest(BaseModel):
@@ -46,16 +52,14 @@ def _store_analysis(repository: str, commit_sha: str, files: dict[str, str], fac
             path = symbol_paths[symbol["id"]]
             source = files[path]
             segments = split_python_symbol(source, symbol)
+            symbol_cards: list[dict[str, Any]] = []
             for segment_index, segment in enumerate(segments):
                 start = segment["start_line"]
                 end = segment["end_line"]
                 excerpt = "\n".join(source.splitlines()[start - 1 : end])
                 evidence_id = f"evidence:{sha256((commit_sha + path + str(start) + str(end)).encode()).hexdigest()[:16]}"
                 card_id = f"card:{sha256((analysis_id + symbol['id'] + str(segment_index)).encode()).hexdigest()[:16]}"
-                card_range = {
-                    "start": {"line": start},
-                    "end": {"line": end},
-                }
+                card_range = {"start": {"line": start}, "end": {"line": end}}
                 card = {
                     "id": card_id,
                     "analysis_id": analysis_id,
@@ -66,12 +70,7 @@ def _store_analysis(repository: str, commit_sha: str, files: dict[str, str], fac
                     "symbol_name": symbol["name"],
                     "range": card_range,
                     "parent_symbol_range": symbol["range"],
-                    "segment": {
-                        "index": segment_index,
-                        "count": len(segments),
-                        "previous_card_id": None,
-                        "next_card_id": None,
-                    },
+                    "segment": {"index": segment_index, "count": len(segments), "previous_card_id": None, "next_card_id": None},
                     "source": excerpt,
                     "basic_explanation": {
                         "status": "STUB_VERIFIED",
@@ -80,14 +79,16 @@ def _store_analysis(repository: str, commit_sha: str, files: dict[str, str], fac
                     },
                     "evidence": [{"id": evidence_id, "type": "SOURCE_RANGE", "path": path, "range": card_range}],
                 }
-                if cards and cards[-1]["symbol_id"] == symbol["id"]:
-                    previous = cards[-1]
+                if symbol_cards:
+                    previous = symbol_cards[-1]
                     card["segment"]["previous_card_id"] = previous["id"]
                     previous["segment"]["next_card_id"] = card_id
-                _CARDS[card_id] = card
-                cards.append(card)
+                symbol_cards.append(card)
+            for card in symbol_cards:
+                _STORE.put_card(card)
+            cards.extend(symbol_cards)
 
-    _ANALYSES[analysis_id] = {
+    analysis = {
         "id": analysis_id,
         "state": "READY",
         "repository": repository,
@@ -96,14 +97,14 @@ def _store_analysis(repository: str, commit_sha: str, files: dict[str, str], fac
         "features": features,
         "card_ids": [card["id"] for card in cards],
     }
-    return {"id": analysis_id, "state": "READY", "card_ids": [card["id"] for card in cards]}
+    _STORE.put_analysis(analysis)
+    return {"id": analysis_id, "state": "READY", "card_ids": analysis["card_ids"]}
 
 
 def _analyze_source(repository: str, commit_sha: str, path: str, source: str) -> dict[str, Any]:
     if not path.endswith(".py"):
         raise HTTPException(status_code=422, detail="fixture slice supports Python files only")
-    facts = analyze_python(path, source)
-    return _store_analysis(repository, commit_sha, {path: source}, facts)
+    return _store_analysis(repository, commit_sha, {path: source}, analyze_python(path, source))
 
 
 @app.post("/v1/fixture-analyses", status_code=201)
@@ -115,7 +116,6 @@ def create_fixture_analysis(request: FixtureAnalysisRequest) -> dict[str, Any]:
 
 @app.post("/v1/analyses", status_code=201)
 def create_github_analysis(request: GitHubAnalysisRequest) -> dict[str, Any]:
-    """Pin a public repository, fetch its bounded Python snapshot, then analyze it as one program."""
     try:
         snapshot = resolve_github_repository(request.repository_url, request.ref)
     except GitHubSourceError as exc:
@@ -127,7 +127,7 @@ def create_github_analysis(request: GitHubAnalysisRequest) -> dict[str, Any]:
 
 @app.get("/v1/analyses/{analysis_id}")
 def get_analysis(analysis_id: str) -> dict[str, Any]:
-    analysis = _ANALYSES.get(analysis_id)
+    analysis = _STORE.get_analysis(analysis_id)
     if analysis is None:
         raise HTTPException(status_code=404, detail="analysis not found")
     return {key: analysis[key] for key in ("id", "state", "repository", "commit_sha")}
@@ -135,7 +135,7 @@ def get_analysis(analysis_id: str) -> dict[str, Any]:
 
 @app.get("/v1/analyses/{analysis_id}/features")
 def get_features(analysis_id: str) -> dict[str, Any]:
-    analysis = _ANALYSES.get(analysis_id)
+    analysis = _STORE.get_analysis(analysis_id)
     if analysis is None:
         raise HTTPException(status_code=404, detail="analysis not found")
     return {"analysis_id": analysis_id, "features": analysis["features"]}
@@ -143,7 +143,7 @@ def get_features(analysis_id: str) -> dict[str, Any]:
 
 @app.get("/v1/cards/{card_id}")
 def get_card(card_id: str) -> dict[str, Any]:
-    card = _CARDS.get(card_id)
+    card = _STORE.get_card(card_id)
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
     return card
