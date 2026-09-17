@@ -6,9 +6,23 @@ on:
     branches: [main]
 
 jobs:
-  compose-config:
+  compose-runtime:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Validate Compose model
         run: docker compose -f compose.yml config --quiet
+      - name: Build application images
+        run: docker compose -f compose.yml build api worker
+      - name: Start persistent API and worker path
+        run: docker compose -f compose.yml up -d --wait postgres redis api worker
+      - name: Verify API health and worker process
+        run: |
+          curl --fail --retry 5 --retry-delay 2 http://localhost:8000/health
+          test "$(docker compose -f compose.yml ps --status running --services worker)" = "worker"
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose -f compose.yml logs --no-color api worker postgres redis
+      - name: Stop runtime
+        if: always()
+        run: docker compose -f compose.yml down -v
