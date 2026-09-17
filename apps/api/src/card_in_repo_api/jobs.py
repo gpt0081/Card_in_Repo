@@ -40,24 +40,27 @@ class AnalysisJob:
 class ClaimedAnalysisJob:
     delivery_id: str
     job: AnalysisJob
+    attempts: int = 1
 
 
 class AnalysisJobQueue(Protocol):
     def enqueue(self, job: AnalysisJob) -> None: ...
     def claim(self, timeout_seconds: int = 5) -> ClaimedAnalysisJob | None: ...
     def ack(self, delivery: ClaimedAnalysisJob) -> None: ...
+    def dead_letter(self, delivery: ClaimedAnalysisJob, reason: str) -> None: ...
 
 
 class MemoryAnalysisJobQueue:
     """Deterministic acknowledged queue for tests; production uses Redis Streams."""
 
     def __init__(self) -> None:
-        self._jobs: deque[AnalysisJob] = deque()
-        self._pending: dict[str, AnalysisJob] = {}
+        self._jobs: deque[tuple[AnalysisJob, int]] = deque()
+        self._pending: dict[str, tuple[AnalysisJob, int]] = {}
+        self._dead: list[tuple[AnalysisJob, int, str]] = []
         self._sequence = 0
 
     def enqueue(self, job: AnalysisJob) -> None:
-        self._jobs.append(job)
+        self._jobs.append((job, 1))
 
     def claim(self, timeout_seconds: int = 5) -> ClaimedAnalysisJob | None:
         del timeout_seconds
@@ -65,24 +68,35 @@ class MemoryAnalysisJobQueue:
             return None
         self._sequence += 1
         delivery_id = str(self._sequence)
-        job = self._jobs.popleft()
-        self._pending[delivery_id] = job
-        return ClaimedAnalysisJob(delivery_id, job)
+        job, attempts = self._jobs.popleft()
+        self._pending[delivery_id] = (job, attempts)
+        return ClaimedAnalysisJob(delivery_id, job, attempts)
 
     def ack(self, delivery: ClaimedAnalysisJob) -> None:
         self._pending.pop(delivery.delivery_id, None)
 
+    def dead_letter(self, delivery: ClaimedAnalysisJob, reason: str) -> None:
+        pending = self._pending.pop(delivery.delivery_id, None)
+        if pending is not None:
+            job, attempts = pending
+            self._dead.append((job, attempts, reason))
+
     def redeliver_pending(self) -> None:
-        for delivery_id, job in list(self._pending.items()):
-            self._jobs.appendleft(job)
+        for delivery_id, (job, attempts) in list(self._pending.items()):
+            self._jobs.appendleft((job, attempts + 1))
             del self._pending[delivery_id]
+
+    @property
+    def dead_letters(self) -> tuple[tuple[AnalysisJob, int, str], ...]:
+        return tuple(self._dead)
 
 
 class RedisAnalysisJobQueue:
-    """Redis Streams consumer-group queue with acknowledgement and stale-job recovery."""
+    """Redis Streams queue with ACK, stale recovery, delivery counts, and a DLQ."""
 
     KEY = "card-in-repo:analysis-jobs:v2"
     GROUP = "analysis-workers-v1"
+    DLQ_KEY = "card-in-repo:analysis-jobs:dead:v1"
     STALE_MS = 60_000
 
     def __init__(self, redis_url: str, *, consumer_id: str | None = None, stale_ms: int | None = None) -> None:
@@ -105,15 +119,19 @@ class RedisAnalysisJobQueue:
     def enqueue(self, job: AnalysisJob) -> None:
         self._redis.xadd(self.KEY, {"payload": job.to_json()})
 
+    def _attempts(self, message_id: str) -> int:
+        pending = self._redis.xpending_range(self.KEY, self.GROUP, min=message_id, max=message_id, count=1)
+        if not pending:
+            return 1
+        return max(1, int(pending[0].get("times_delivered", 1)))
+
     def _delivery(self, message_id: str, fields: dict[str, str]) -> ClaimedAnalysisJob:
         payload = fields.get("payload")
         if payload is None:
             raise ValueError("analysis job stream entry has no payload")
-        return ClaimedAnalysisJob(message_id, AnalysisJob.from_json(payload))
+        return ClaimedAnalysisJob(message_id, AnalysisJob.from_json(payload), self._attempts(message_id))
 
     def claim(self, timeout_seconds: int = 5) -> ClaimedAnalysisJob | None:
-        # Recover one abandoned delivery before waiting for new work. XAUTOCLAIM makes
-        # a worker crash recoverable without destructively removing the job first.
         _next, stale, _deleted = self._redis.xautoclaim(
             self.KEY, self.GROUP, self._consumer, self._stale_ms, start_id="0-0", count=1
         )
@@ -121,10 +139,7 @@ class RedisAnalysisJobQueue:
             message_id, fields = stale[0]
             return self._delivery(message_id, fields)
         items = self._redis.xreadgroup(
-            self.GROUP,
-            self._consumer,
-            {self.KEY: ">"},
-            count=1,
+            self.GROUP, self._consumer, {self.KEY: ">"}, count=1,
             block=max(0, timeout_seconds) * 1000,
         )
         if not items:
@@ -136,3 +151,12 @@ class RedisAnalysisJobQueue:
     def ack(self, delivery: ClaimedAnalysisJob) -> None:
         self._redis.xack(self.KEY, self.GROUP, delivery.delivery_id)
         self._redis.xdel(self.KEY, delivery.delivery_id)
+
+    def dead_letter(self, delivery: ClaimedAnalysisJob, reason: str) -> None:
+        self._redis.xadd(self.DLQ_KEY, {
+            "payload": delivery.job.to_json(),
+            "attempts": str(delivery.attempts),
+            "reason": reason,
+            "source_delivery_id": delivery.delivery_id,
+        })
+        self.ack(delivery)
