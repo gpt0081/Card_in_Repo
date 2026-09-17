@@ -1,6 +1,9 @@
+from importlib import import_module
+
 from fastapi.testclient import TestClient
 
 from card_in_repo_api import app
+from card_in_repo_api.github_source import GitHubSource
 
 
 client = TestClient(app)
@@ -57,3 +60,27 @@ def test_fixture_analysis_rejects_unsupported_language():
         "language": "rust",
     })
     assert response.status_code == 422
+
+
+def test_public_github_analysis_uses_resolved_immutable_snapshot(monkeypatch):
+    app_module = import_module("card_in_repo_api.app")
+    sha = "c" * 40
+    monkeypatch.setattr(
+        app_module,
+        "resolve_github_file",
+        lambda repository_url, path, ref=None: GitHubSource(
+            repository="octo/demo", commit_sha=sha, path="sample.py", source=SOURCE
+        ),
+    )
+
+    response = client.post("/v1/analyses", json={
+        "repository_url": "https://github.com/octo/demo",
+        "path": "sample.py",
+    })
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["state"] == "READY"
+    assert payload["repository"] == "octo/demo"
+    assert payload["commit_sha"] == sha
+    stored = client.get(f"/v1/analyses/{payload['id']}").json()
+    assert stored["commit_sha"] == sha
