@@ -16,12 +16,31 @@ def test_analysis_job_rejects_unknown_or_invalid_payloads():
         AnalysisJob.from_json('{"analysis_id":"a","repository_url":"https://github.com/o/r","extra":true}')
 
 
-def test_memory_queue_preserves_fifo_order_and_empty_state():
+def test_memory_queue_preserves_fifo_and_requires_ack():
     queue = MemoryAnalysisJobQueue()
     first = AnalysisJob("a1", "https://github.com/octo/one")
     second = AnalysisJob("a2", "https://github.com/octo/two", "dev")
     queue.enqueue(first)
     queue.enqueue(second)
-    assert queue.dequeue() == first
-    assert queue.dequeue() == second
-    assert queue.dequeue() is None
+
+    first_delivery = queue.claim()
+    assert first_delivery is not None and first_delivery.job == first
+    queue.ack(first_delivery)
+    second_delivery = queue.claim()
+    assert second_delivery is not None and second_delivery.job == second
+    queue.ack(second_delivery)
+    assert queue.claim() is None
+
+
+def test_unacked_memory_delivery_can_be_redelivered_after_worker_loss():
+    queue = MemoryAnalysisJobQueue()
+    job = AnalysisJob("a1", "https://github.com/octo/one")
+    queue.enqueue(job)
+    abandoned = queue.claim()
+    assert abandoned is not None and abandoned.job == job
+
+    queue.redeliver_pending()
+    redelivery = queue.claim()
+    assert redelivery is not None
+    assert redelivery.job == job
+    assert redelivery.delivery_id != abandoned.delivery_id
