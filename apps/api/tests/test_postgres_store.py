@@ -51,6 +51,24 @@ def test_requeue_state_and_outbox_use_one_compare_and_set_transaction() -> None:
     assert store.get_pending_job() == (original["id"], job)
 
 
+def test_postgres_execution_claim_has_single_delivery_owner() -> None:
+    store = PostgresAnalysisStore(DATABASE_URL); store.initialize()
+    analysis = {"id": "analysis:execution-owner", "state": "QUEUED", "retry_count": 0}
+    store.put_analysis(analysis)
+
+    first = store.claim_analysis_execution(analysis["id"], "stream-1", 0)
+    assert first is not None
+    assert first["state"] == "RESOLVING"
+    assert first["execution_delivery_id"] == "stream-1"
+    assert store.claim_analysis_execution(analysis["id"], "stream-2", 0) is None
+
+    store.put_analysis({**first, "state": "PARSING"})
+    resumed = store.claim_analysis_execution(analysis["id"], "stream-1", 1)
+    assert resumed is not None
+    assert resumed["state"] == "RESOLVING"
+    assert resumed["retry_count"] == 1
+
+
 def test_card_requires_existing_analysis() -> None:
     store = PostgresAnalysisStore(DATABASE_URL); store.initialize()
     orphan = {"id": "card:orphan", "analysis_id": "analysis:does-not-exist", "source": "pass"}
