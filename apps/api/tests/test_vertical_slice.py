@@ -36,9 +36,13 @@ def test_fixture_analysis_reaches_ready_feature_map_and_evidence_card():
     assert concept_view.status_code == 200
     entry_concept = next(concept for concept in concept_view.json()["concepts"] if concept["name"] == "entry")
     assert entry_concept["kind"] == "execution_flow"
-    assert entry_concept["explanation"] is None
     assert [item["symbol_name"] for item in entry_concept["evidence"]] == ["entry", "load_user", "normalize"]
     assert all(item["path"] == "sample.py" for item in entry_concept["evidence"])
+    explanation = entry_concept["explanation"]
+    assert explanation["level"] == "basic"
+    assert explanation["verified"] is True
+    evidence_ids = {item["id"] for item in entry_concept["evidence"]}
+    assert set(explanation["claims"][0]["evidence_ids"]) == evidence_ids
     payload = client.get(f"/v1/cards/{body['card_ids'][0]}").json()
     assert payload["basic_explanation"]["status"] == "STUB_VERIFIED"
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .teaching import build_basic_explanation, evidence_id
+
 
 def build_concept_candidates(facts: dict[str, Any], features: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Derive teachable concept candidates from static-analysis evidence only."""
@@ -14,12 +16,14 @@ def build_concept_candidates(facts: dict[str, Any], features: list[dict[str, Any
         steps = feature.get("flow_steps", [])
         if not steps:
             continue
+        concept_id = f"concept:flow:{feature['id']}"
         evidence: list[dict[str, Any]] = []
-        for step in steps:
+        for index, step in enumerate(steps):
             symbol = symbols.get(step.get("symbol_id"))
             if not symbol:
                 continue
             evidence.append({
+                "id": evidence_id(concept_id, index),
                 "symbol_id": symbol["id"],
                 "symbol_name": symbol.get("name"),
                 "path": symbol_paths.get(symbol["id"]),
@@ -29,16 +33,16 @@ def build_concept_candidates(facts: dict[str, Any], features: list[dict[str, Any
             })
         if not evidence:
             continue
-        concept_id = f"concept:flow:{feature['id']}"
         if concept_id in seen:
             continue
         seen.add(concept_id)
-        concepts.append({
+        concept = {
             "id": concept_id,
             "kind": "execution_flow",
             "name": feature.get("name") or evidence[0].get("symbol_name") or "Execution flow",
             "feature_id": feature["id"],
             "evidence": evidence,
-            "explanation": None,
-        })
+        }
+        concept["explanation"] = build_basic_explanation(concept)
+        concepts.append(concept)
     return concepts
