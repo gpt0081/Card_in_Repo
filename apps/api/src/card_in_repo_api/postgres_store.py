@@ -35,9 +35,7 @@ class PostgresAnalysisStore:
                     )
                     """
                 )
-                cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS cards_analysis_id_idx ON cards (analysis_id)"
-                )
+                cursor.execute("CREATE INDEX IF NOT EXISTS cards_analysis_id_idx ON cards (analysis_id)")
 
     def put_analysis(self, analysis: dict[str, Any]) -> None:
         with psycopg.connect(self.database_url) as connection:
@@ -51,10 +49,21 @@ class PostgresAnalysisStore:
 
     def get_analysis(self, analysis_id: str) -> dict[str, Any] | None:
         with psycopg.connect(self.database_url) as connection:
-            row = connection.execute(
-                "SELECT payload FROM analyses WHERE id = %s", (analysis_id,)
-            ).fetchone()
+            row = connection.execute("SELECT payload FROM analyses WHERE id = %s", (analysis_id,)).fetchone()
         return self._payload(row)
+
+    def transition_analysis(self, analysis_id: str, expected_state: str, analysis: dict[str, Any]) -> bool:
+        """Atomically replace a snapshot only when its persisted state still matches."""
+        with psycopg.connect(self.database_url) as connection:
+            cursor = connection.execute(
+                """
+                UPDATE analyses
+                SET payload = %s
+                WHERE id = %s AND payload->>'state' = %s
+                """,
+                (Jsonb(analysis), analysis_id, expected_state),
+            )
+            return cursor.rowcount == 1
 
     def put_card(self, card: dict[str, Any]) -> None:
         with psycopg.connect(self.database_url) as connection:
@@ -70,9 +79,7 @@ class PostgresAnalysisStore:
 
     def get_card(self, card_id: str) -> dict[str, Any] | None:
         with psycopg.connect(self.database_url) as connection:
-            row = connection.execute(
-                "SELECT payload FROM cards WHERE id = %s", (card_id,)
-            ).fetchone()
+            row = connection.execute("SELECT payload FROM cards WHERE id = %s", (card_id,)).fetchone()
         return self._payload(row)
 
     @staticmethod
