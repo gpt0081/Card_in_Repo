@@ -13,16 +13,18 @@ jobs:
       - name: Validate Compose model
         run: docker compose -f compose.yml config --quiet
       - name: Build application images
-        run: docker compose -f compose.yml build api worker
-      - name: Start persistent API and worker path
-        run: docker compose -f compose.yml up -d --wait postgres redis api worker
-      - name: Verify API health and worker process
+        run: docker compose -f compose.yml build api worker web
+      - name: Start persistent product path
+        run: docker compose -f compose.yml up -d --wait postgres redis api worker web
+      - name: Verify API, worker, and PWA
         run: |
           curl --fail --retry 5 --retry-delay 2 http://localhost:8000/health
+          curl --fail --retry 5 --retry-delay 2 http://localhost:8080/ | grep -q 'Card in Repo'
           test "$(docker compose -f compose.yml ps --status running --services worker)" = "worker"
+          test "$(docker compose -f compose.yml ps --status running --services web)" = "web"
       - name: Show logs on failure
         if: failure()
-        run: docker compose -f compose.yml logs --no-color api worker postgres redis
+        run: docker compose -f compose.yml logs --no-color api worker web postgres redis
       - name: Stop runtime
         if: always()
         run: docker compose -f compose.yml down -v
