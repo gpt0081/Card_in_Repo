@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('public Python repository reaches READY and renders the feature-first map', async ({ page }) => {
+test('public Python repository reaches READY, renders the feature map, then opens fact-backed files', async ({ page }) => {
   test.setTimeout(120_000);
   await page.goto(process.env.E2E_BASE_URL ?? 'http://127.0.0.1:8080');
 
@@ -18,7 +18,11 @@ test('public Python repository reaches READY and renders the feature-first map',
   await expect(page.getByRole('heading', { name: 'Repository map' })).toBeVisible();
   await expect(page.locator('article.feature').first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Feature map' })).toBeEnabled();
-  await expect(page.getByRole('button', { name: 'Files' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Files' })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Concepts' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Cards' })).toBeDisabled();
+
+  await page.getByRole('button', { name: 'Files' }).click();
+  await expect(page.getByRole('heading', { name: 'File structure' })).toBeVisible();
+  await expect(page.locator('article.file').first()).toBeVisible();
 });
