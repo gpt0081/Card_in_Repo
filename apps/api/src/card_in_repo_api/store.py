@@ -12,6 +12,7 @@ class AnalysisStore(Protocol):
     def get_analysis(self, analysis_id: str) -> dict[str, Any] | None: ...
     def transition_analysis(self, analysis_id: str, expected_state: str, analysis: dict[str, Any]) -> bool: ...
     def claim_analysis_execution(self, analysis_id: str, delivery_id: str, retry_count: int) -> dict[str, Any] | None: ...
+    def put_completed_analysis(self, analysis: dict[str, Any], cards: list[dict[str, Any]]) -> None: ...
     def put_card(self, card: dict[str, Any]) -> None: ...
     def get_card(self, card_id: str) -> dict[str, Any] | None: ...
 
@@ -54,6 +55,16 @@ class MemoryAnalysisStore:
             claimed = {**current, "state": "RESOLVING", "retry_count": retry_count, "execution_delivery_id": delivery_id}
             self._analyses[analysis_id] = deepcopy(claimed)
             return deepcopy(claimed)
+
+    def put_completed_analysis(self, analysis: dict[str, Any], cards: list[dict[str, Any]]) -> None:
+        """Publish cards and READY analysis together under the same store lock."""
+        with self._lock:
+            for card in cards:
+                if card["analysis_id"] != analysis["id"]:
+                    raise ValueError("card belongs to a different analysis")
+            for card in cards:
+                self._cards[card["id"]] = deepcopy(card)
+            self._analyses[analysis["id"]] = deepcopy(analysis)
 
     def put_card(self, card: dict[str, Any]) -> None:
         with self._lock:
