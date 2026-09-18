@@ -72,6 +72,7 @@ def store_completed_analysis(repository: str, commit_sha: str, files: dict[str, 
                 symbol_cards.append(card)
             cards.extend(symbol_cards)
     previous = _STORE.get_analysis(analysis_id) or {}
+    previous.pop("error", None)
     analysis = {**previous, "id": analysis_id, "state": "READY", "repository": repository, "commit_sha": commit_sha, "facts": facts, "features": features, "card_ids": [card["id"] for card in cards]}
     _STORE.put_analysis(analysis)
     for card in cards:
@@ -120,11 +121,15 @@ def requeue_exhausted_analysis(analysis_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail="analysis predates requeue source metadata")
     queued = {**analysis, "state": "QUEUED", "retry_count": 0, "requeued": True}
     queued.pop("error", None)
-    _STORE.put_analysis(queued)
+    if not _STORE.transition_analysis(analysis_id, "FAILED_EXHAUSTED", queued):
+        current = _STORE.get_analysis(analysis_id)
+        if current and current.get("state") == "QUEUED" and current.get("requeued"):
+            return {"id": analysis_id, "state": "QUEUED"}
+        raise HTTPException(status_code=409, detail="analysis state changed during requeue")
     try:
         _QUEUE.enqueue(AnalysisJob(analysis_id=analysis_id, repository_url=repository_url, ref=analysis.get("source_ref")))
     except Exception as exc:
-        _STORE.put_analysis(analysis)
+        _STORE.transition_analysis(analysis_id, "QUEUED", analysis)
         raise HTTPException(status_code=503, detail="analysis queue unavailable") from exc
     return {"id": analysis_id, "state": "QUEUED"}
 

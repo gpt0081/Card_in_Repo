@@ -34,10 +34,21 @@ def test_snapshots_survive_store_recreation() -> None:
     first.put_analysis(analysis)
     first.put_card(card)
 
-    # A fresh store instance has no process memory from the writer. Reads must come from PostgreSQL.
     second = PostgresAnalysisStore(DATABASE_URL)
     assert second.get_analysis(analysis["id"]) == analysis
     assert second.get_card(card["id"]) == card
+
+
+def test_state_transition_is_compare_and_set() -> None:
+    store = PostgresAnalysisStore(DATABASE_URL)
+    store.initialize()
+    original = {"id": "analysis:cas", "state": "FAILED_EXHAUSTED", "retry_count": 3}
+    queued = {"id": "analysis:cas", "state": "QUEUED", "retry_count": 0, "requeued": True}
+    store.put_analysis(original)
+
+    assert store.transition_analysis(original["id"], "FAILED_EXHAUSTED", queued) is True
+    assert store.transition_analysis(original["id"], "FAILED_EXHAUSTED", queued) is False
+    assert store.get_analysis(original["id"]) == queued
 
 
 def test_card_requires_existing_analysis() -> None:
