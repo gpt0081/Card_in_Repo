@@ -27,3 +27,21 @@ def test_memory_store_returns_none_for_missing_records():
     store = MemoryAnalysisStore()
     assert store.get_analysis("missing") is None
     assert store.get_card("missing") is None
+
+
+def test_execution_claim_rejects_distinct_duplicate_but_allows_same_delivery_resume():
+    store = MemoryAnalysisStore()
+    store.put_analysis({"id": "analysis-1", "state": "QUEUED", "repository_url": "https://github.com/octo/demo"})
+
+    first = store.claim_analysis_execution("analysis-1", "stream-1", 0)
+    assert first is not None
+    assert first["state"] == "RESOLVING"
+    assert first["execution_delivery_id"] == "stream-1"
+
+    assert store.claim_analysis_execution("analysis-1", "duplicate-stream-2", 0) is None
+
+    store.put_analysis({**first, "state": "PARSING"})
+    resumed = store.claim_analysis_execution("analysis-1", "stream-1", 1)
+    assert resumed is not None
+    assert resumed["state"] == "RESOLVING"
+    assert resumed["retry_count"] == 1
