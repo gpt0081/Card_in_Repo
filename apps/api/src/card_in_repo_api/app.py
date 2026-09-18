@@ -160,6 +160,26 @@ def get_features(analysis_id: str) -> dict[str, Any]:
     return {"analysis_id": analysis_id, "features": analysis.get("features", [])}
 
 
+@app.get("/v1/analyses/{analysis_id}/files")
+def get_files(analysis_id: str) -> dict[str, Any]:
+    analysis = _STORE.get_analysis(analysis_id)
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="analysis not found")
+    if analysis.get("state") != "READY":
+        raise HTTPException(status_code=409, detail="file structure is available only after repository map is ready")
+    facts = analysis.get("facts") or {}
+    symbols = facts.get("symbols") or []
+    symbol_paths = facts.get("symbol_paths") or {}
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for symbol in symbols:
+        path = symbol_paths.get(symbol.get("id"))
+        if not path:
+            continue
+        grouped.setdefault(path, []).append({key: symbol[key] for key in ("id", "name", "kind", "range") if key in symbol})
+    files = [{"path": path, "symbols": grouped[path]} for path in sorted(grouped)]
+    return {"analysis_id": analysis_id, "files": files}
+
+
 @app.get("/v1/cards/{card_id}")
 def get_card(card_id: str) -> dict[str, Any]:
     card = _STORE.get_card(card_id)

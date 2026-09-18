@@ -28,8 +28,21 @@ def test_fixture_analysis_reaches_ready_feature_map_and_evidence_card():
     features = client.get(f"/v1/analyses/{body['id']}/features").json()["features"]
     entry = next(feature for feature in features if feature["name"] == "entry")
     assert [step["symbol_name"] for step in entry["flow_steps"]] == ["entry", "load_user", "normalize"]
+    file_view = client.get(f"/v1/analyses/{body['id']}/files")
+    assert file_view.status_code == 200
+    assert file_view.json()["files"][0]["path"] == "sample.py"
+    assert {symbol["name"] for symbol in file_view.json()["files"][0]["symbols"]} == {"normalize", "load_user", "entry"}
     payload = client.get(f"/v1/cards/{body['card_ids'][0]}").json()
     assert payload["basic_explanation"]["status"] == "STUB_VERIFIED"
+
+
+def test_file_structure_is_gated_until_repository_map_is_ready():
+    app_module = import_module("card_in_repo_api.app")
+    store = MemoryAnalysisStore()
+    app_module.set_store(store)
+    store.put_analysis({"id": "queued-files", "state": "QUEUED", "facts": {}})
+    response = client.get("/v1/analyses/queued-files/files")
+    assert response.status_code == 409
 
 
 def test_fixture_analysis_rejects_unsupported_language():
