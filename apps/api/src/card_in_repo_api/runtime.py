@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 
+import psycopg
+
 from .jobs import AnalysisJobQueue, MemoryAnalysisJobQueue, RedisAnalysisJobQueue
 from .postgres_store import PostgresAnalysisStore
 from .store import AnalysisStore, MemoryAnalysisStore
@@ -9,6 +11,21 @@ from .store import AnalysisStore, MemoryAnalysisStore
 
 class RuntimeConfigurationError(RuntimeError):
     """Raised when runtime configuration is incomplete or unsafe."""
+
+
+def _initialize_postgres_store(store: PostgresAnalysisStore) -> None:
+    """Tolerate the one startup race where API and worker bootstrap schema together.
+
+    PostgreSQL's CREATE TABLE IF NOT EXISTS can still raise UniqueViolation when
+    two transactions create the same relation concurrently. The conflicting
+    transaction has resolved before PostgreSQL reports that violation, so one
+    clean retry observes the schema created by the winner. Other database
+    failures remain fatal rather than being hidden behind startup retries.
+    """
+    try:
+        store.initialize()
+    except psycopg.errors.UniqueViolation:
+        store.initialize()
 
 
 def build_analysis_store(env: dict[str, str] | None = None) -> AnalysisStore:
@@ -21,7 +38,7 @@ def build_analysis_store(env: dict[str, str] | None = None) -> AnalysisStore:
         if not database_url:
             raise RuntimeConfigurationError("DATABASE_URL is required when CARD_IN_REPO_STORE=postgres")
         store = PostgresAnalysisStore(database_url)
-        store.initialize()
+        _initialize_postgres_store(store)
         return store
     raise RuntimeConfigurationError(f"unsupported CARD_IN_REPO_STORE={backend!r}; expected 'memory' or 'postgres'")
 
