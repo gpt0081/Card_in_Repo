@@ -15,6 +15,13 @@ def test_repository_url_parser_rejects_non_github_and_nested_urls():
         parse_public_repository_url("https://github.com/octo/demo/issues/1")
 
 
+def test_request_headers_add_optional_github_token(monkeypatch):
+    monkeypatch.delenv("CARD_IN_REPO_GITHUB_TOKEN", raising=False)
+    assert "Authorization" not in github_source._request_headers()
+    monkeypatch.setenv("CARD_IN_REPO_GITHUB_TOKEN", "fixture-token")
+    assert github_source._request_headers()["Authorization"] == "Bearer fixture-token"
+
+
 def test_resolve_github_file_pins_content_request_to_commit_sha(monkeypatch):
     sha = "a" * 40
     calls: list[str] = []
