@@ -36,6 +36,12 @@ def verify_explanation(
     return {**explanation, "verified": True}
 
 
+def _execution_order(item: dict[str, Any]) -> tuple[bool, int]:
+    """Sort numbered execution evidence first and tolerate unresolved/null order facts."""
+    order = item.get("order")
+    return (order is None, order if isinstance(order, int) else 0)
+
+
 def build_basic_explanation(concept: dict[str, Any]) -> dict[str, Any]:
     """Create the MVP Basic teaching layer from verified execution evidence.
 
@@ -48,7 +54,7 @@ def build_basic_explanation(concept: dict[str, Any]) -> dict[str, Any]:
     if not available:
         raise UnverifiedExplanation("cannot teach a concept without static evidence")
 
-    ordered = sorted(evidence, key=lambda item: item.get("order", 0))
+    ordered = sorted(evidence, key=_execution_order)
     names = [item.get("symbol_name") or item["symbol_id"] for item in ordered]
     path = " → ".join(names)
     explanation = {
