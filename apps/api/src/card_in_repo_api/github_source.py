@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
@@ -27,8 +28,16 @@ class GitHubRepositorySnapshot:
     files: dict[str, str]
 
 
+def _request_headers() -> dict[str, str]:
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "Card-in-Repo/0.1", "X-GitHub-Api-Version": "2022-11-28"}
+    token = os.getenv("CARD_IN_REPO_GITHUB_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
 def _get_json(url: str) -> dict:
-    request = Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "Card-in-Repo/0.1", "X-GitHub-Api-Version": "2022-11-28"})
+    request = Request(url, headers=_request_headers())
     try:
         with urlopen(request, timeout=10) as response:
             return json.loads(response.read().decode("utf-8"))
