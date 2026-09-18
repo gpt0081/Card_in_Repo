@@ -71,7 +71,8 @@ def store_completed_analysis(repository: str, commit_sha: str, files: dict[str, 
                     previous["segment"]["next_card_id"] = card_id
                 symbol_cards.append(card)
             cards.extend(symbol_cards)
-    analysis = {"id": analysis_id, "state": "READY", "repository": repository, "commit_sha": commit_sha, "facts": facts, "features": features, "card_ids": [card["id"] for card in cards]}
+    previous = _STORE.get_analysis(analysis_id) or {}
+    analysis = {**previous, "id": analysis_id, "state": "READY", "repository": repository, "commit_sha": commit_sha, "facts": facts, "features": features, "card_ids": [card["id"] for card in cards]}
     _STORE.put_analysis(analysis)
     for card in cards:
         _STORE.put_card(card)
@@ -94,7 +95,7 @@ def create_fixture_analysis(request: FixtureAnalysisRequest) -> dict[str, Any]:
 @app.post("/v1/analyses", status_code=202)
 def create_github_analysis(request: GitHubAnalysisRequest) -> dict[str, Any]:
     analysis_id = str(uuid4())
-    queued = {"id": analysis_id, "state": "QUEUED", "repository": request.repository_url, "commit_sha": None, "facts": {}, "features": [], "card_ids": []}
+    queued = {"id": analysis_id, "state": "QUEUED", "repository": request.repository_url, "source_repository_url": request.repository_url, "source_ref": request.ref, "commit_sha": None, "facts": {}, "features": [], "card_ids": [], "retry_count": 0}
     _STORE.put_analysis(queued)
     try:
         _QUEUE.enqueue(AnalysisJob(analysis_id=analysis_id, repository_url=request.repository_url, ref=request.ref))
@@ -105,12 +106,35 @@ def create_github_analysis(request: GitHubAnalysisRequest) -> dict[str, Any]:
     return {"id": analysis_id, "state": "QUEUED"}
 
 
+@app.post("/v1/analyses/{analysis_id}/requeue", status_code=202)
+def requeue_exhausted_analysis(analysis_id: str) -> dict[str, Any]:
+    analysis = _STORE.get_analysis(analysis_id)
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="analysis not found")
+    if analysis.get("state") == "QUEUED" and analysis.get("requeued"):
+        return {"id": analysis_id, "state": "QUEUED"}
+    if analysis.get("state") != "FAILED_EXHAUSTED":
+        raise HTTPException(status_code=409, detail="only exhausted analyses can be requeued")
+    repository_url = analysis.get("source_repository_url")
+    if not repository_url:
+        raise HTTPException(status_code=409, detail="analysis predates requeue source metadata")
+    queued = {**analysis, "state": "QUEUED", "retry_count": 0, "requeued": True}
+    queued.pop("error", None)
+    _STORE.put_analysis(queued)
+    try:
+        _QUEUE.enqueue(AnalysisJob(analysis_id=analysis_id, repository_url=repository_url, ref=analysis.get("source_ref")))
+    except Exception as exc:
+        _STORE.put_analysis(analysis)
+        raise HTTPException(status_code=503, detail="analysis queue unavailable") from exc
+    return {"id": analysis_id, "state": "QUEUED"}
+
+
 @app.get("/v1/analyses/{analysis_id}")
 def get_analysis(analysis_id: str) -> dict[str, Any]:
     analysis = _STORE.get_analysis(analysis_id)
     if analysis is None:
         raise HTTPException(status_code=404, detail="analysis not found")
-    return {key: analysis.get(key) for key in ("id", "state", "repository", "commit_sha")}
+    return {key: analysis.get(key) for key in ("id", "state", "repository", "commit_sha", "retry_count", "error") if key in analysis}
 
 
 @app.get("/v1/analyses/{analysis_id}/features")
