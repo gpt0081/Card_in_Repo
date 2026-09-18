@@ -59,10 +59,45 @@ def test_public_github_analysis_is_queued_then_worker_reaches_ready(monkeypatch)
     analysis = store.get_analysis(payload["id"])
     assert analysis["state"] == "READY"
     assert analysis["commit_sha"] == sha
+    assert analysis["source_repository_url"] == "https://github.com/octo/demo"
     entry = next(feature for feature in analysis["features"] if feature["name"] == "entry")
     assert [step["symbol_name"] for step in entry["flow_steps"]] == ["entry", "load_user"]
     cards = [store.get_card(card_id) for card_id in analysis["card_ids"]]
     assert {card["path"] for card in cards} == {"app.py", "services/user.py"}
+
+
+def test_exhausted_analysis_can_be_requeued_once_without_changing_identity():
+    app_module = import_module("card_in_repo_api.app")
+    store = MemoryAnalysisStore()
+    queue = MemoryAnalysisJobQueue()
+    app_module.set_store(store)
+    app_module.set_queue(queue)
+    analysis_id = "analysis-exhausted"
+    store.put_analysis({"id": analysis_id, "state": "FAILED_EXHAUSTED", "repository": "octo/demo", "source_repository_url": "https://github.com/octo/demo", "source_ref": "main", "commit_sha": "e" * 40, "retry_count": 2, "error": "analysis worker exhausted retry budget", "facts": {}, "features": [], "card_ids": []})
+
+    first = client.post(f"/v1/analyses/{analysis_id}/requeue")
+    second = client.post(f"/v1/analyses/{analysis_id}/requeue")
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert first.json() == second.json() == {"id": analysis_id, "state": "QUEUED"}
+    delivery = queue.claim(0)
+    assert delivery is not None
+    assert delivery.job.analysis_id == analysis_id
+    assert delivery.job.repository_url == "https://github.com/octo/demo"
+    assert delivery.job.ref == "main"
+    assert queue.claim(0) is None
+    persisted = store.get_analysis(analysis_id)
+    assert persisted["retry_count"] == 0
+    assert "error" not in persisted
+
+
+def test_requeue_rejects_non_exhausted_analysis():
+    app_module = import_module("card_in_repo_api.app")
+    store = MemoryAnalysisStore()
+    app_module.set_store(store)
+    store.put_analysis({"id": "ready", "state": "READY"})
+    response = client.post("/v1/analyses/ready/requeue")
+    assert response.status_code == 409
 
 
 def test_long_function_cards_are_syntax_aligned_and_linked():
