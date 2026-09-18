@@ -28,13 +28,23 @@ def run_one(queue: AnalysisJobQueue | None = None, timeout_seconds: int = 5) -> 
     if current is None:
         queue.ack(delivery)
         return True
-    if current.get("state") in {"READY", "FAILED_EXHAUSTED"}:
+    if current.get("state") in {"READY", "FAILED_EXHAUSTED", "FAILED_TERMINAL"}:
         queue.ack(delivery)
         return True
+
+    claim = getattr(_STORE, "claim_analysis_execution", None)
+    if claim is None:
+        raise RuntimeError("analysis store does not support execution claims")
+    current = claim(job.analysis_id, delivery.delivery_id, delivery.attempts - 1)
+    if current is None:
+        # A distinct duplicate stream entry lost the execution race. It is safe to
+        # discard this entry: the winning delivery remains pending until it commits.
+        queue.ack(delivery)
+        return True
+
     try:
-        _STORE.put_analysis({**current, "state": "RESOLVING", "retry_count": delivery.attempts - 1})
         snapshot = resolve_github_repository(job.repository_url, job.ref)
-        _STORE.put_analysis({**current, "state": "PARSING", "retry_count": delivery.attempts - 1, "repository": snapshot.repository, "commit_sha": snapshot.commit_sha})
+        _STORE.put_analysis({**current, "state": "PARSING", "repository": snapshot.repository, "commit_sha": snapshot.commit_sha})
         facts = analyze_python_repository(snapshot.files)
         store_completed_analysis(snapshot.repository, snapshot.commit_sha, snapshot.files, facts, analysis_id=job.analysis_id)
     except GitHubSourceError as exc:
