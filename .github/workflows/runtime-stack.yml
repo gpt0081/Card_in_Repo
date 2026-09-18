@@ -16,10 +16,15 @@ jobs:
         run: docker compose -f compose.yml build api worker web
       - name: Start persistent product path
         run: docker compose -f compose.yml up -d --wait postgres redis api worker web
-      - name: Verify API, worker, and PWA
+      - name: Verify API, worker, PWA, and browser-facing proxy
         run: |
           curl --fail --retry 5 --retry-delay 2 http://localhost:8000/health
           curl --fail --retry 5 --retry-delay 2 http://localhost:8080/ | grep -q 'Card in Repo'
+          curl --fail --retry 5 --retry-delay 2 http://localhost:8080/api-health
+          response="$(curl --fail -sS -X POST http://localhost:8080/v1/analyses \
+            -H 'content-type: application/json' \
+            --data '{"repository_url":"https://github.com/octocat/Hello-World"}')"
+          python -c 'import json,sys; r=json.loads(sys.argv[1]); assert r["id"] and r["state"] == "QUEUED", r' "$response"
           test "$(docker compose -f compose.yml ps --status running --services worker)" = "worker"
           test "$(docker compose -f compose.yml ps --status running --services web)" = "web"
       - name: Show logs on failure
