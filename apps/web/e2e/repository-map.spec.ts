@@ -1,11 +1,14 @@
 import { expect, test } from '@playwright/test';
 
-test('public repository reaches READY and renders the feature-first map', async ({ page }) => {
+test('public Python repository reaches READY and renders the feature-first map', async ({ page }) => {
   test.setTimeout(120_000);
   await page.goto(process.env.E2E_BASE_URL ?? 'http://127.0.0.1:8080');
 
   await expect(page.getByRole('heading', { name: 'Read the flow before the files.' })).toBeVisible();
-  await page.getByLabel('Public repository').fill('https://github.com/gpt0081/Card_in_Repo');
+  // Use a stable public Python fixture whose default branch contains analyzable
+  // source. Card_in_Repo's main branch is intentionally still the bootstrap
+  // contract while the implementation is progressing through stacked PRs.
+  await page.getByLabel('Public repository').fill('https://github.com/pypa/sampleproject');
   await page.getByRole('button', { name: 'Map repo' }).click();
 
   const status = page.locator('.status strong');
