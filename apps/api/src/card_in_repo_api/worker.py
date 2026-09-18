@@ -7,6 +7,7 @@ from card_in_repo_analyzer import analyze_python_repository
 from .app import _STORE, store_completed_analysis
 from .github_source import GitHubSourceError, resolve_github_repository
 from .jobs import AnalysisJobQueue
+from .outbox import dispatch_one
 from .runtime import build_analysis_queue
 
 
@@ -18,7 +19,6 @@ def _max_attempts() -> int:
 
 
 def run_one(queue: AnalysisJobQueue | None = None, timeout_seconds: int = 5) -> bool:
-    """Process one claimed analysis; acknowledge only after a durable outcome is stored."""
     queue = queue or build_analysis_queue()
     delivery = queue.claim(timeout_seconds)
     if delivery is None:
@@ -50,7 +50,6 @@ def run_one(queue: AnalysisJobQueue | None = None, timeout_seconds: int = 5) -> 
             queue.dead_letter(delivery, reason)
             return True
         _STORE.put_analysis({**latest, "state": "FAILED_RETRYABLE", "retry_count": delivery.attempts - 1, "error": "analysis worker failed"})
-        # Leave pending so Redis XAUTOCLAIM can transfer it after the lease expires.
         raise
     queue.ack(delivery)
     return True
@@ -59,6 +58,8 @@ def run_one(queue: AnalysisJobQueue | None = None, timeout_seconds: int = 5) -> 
 def main() -> None:
     queue = build_analysis_queue()
     while True:
+        if dispatch_one(_STORE, queue):
+            continue
         run_one(queue, timeout_seconds=5)
 
 
