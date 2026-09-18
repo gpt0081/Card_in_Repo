@@ -122,6 +122,21 @@ class PostgresAnalysisStore:
             """, (retry_count, delivery_id, analysis_id, delivery_id)).fetchone()
         return self._payload(row)
 
+    def put_completed_analysis(self, analysis: dict[str, Any], cards: list[dict[str, Any]]) -> None:
+        """Commit all cards before exposing READY, in one PostgreSQL transaction."""
+        with psycopg.connect(self.database_url) as connection:
+            for card in cards:
+                if card["analysis_id"] != analysis["id"]:
+                    raise ValueError("card belongs to a different analysis")
+                connection.execute("""
+                    INSERT INTO cards (id, analysis_id, payload) VALUES (%s, %s, %s)
+                    ON CONFLICT (id) DO UPDATE SET analysis_id = EXCLUDED.analysis_id, payload = EXCLUDED.payload
+                """, (card["id"], card["analysis_id"], Jsonb(card)))
+            connection.execute("""
+                INSERT INTO analyses (id, payload) VALUES (%s, %s)
+                ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload
+            """, (analysis["id"], Jsonb(analysis)))
+
     def put_card(self, card: dict[str, Any]) -> None:
         with psycopg.connect(self.database_url) as connection:
             connection.execute("""
