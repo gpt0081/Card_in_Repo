@@ -98,6 +98,30 @@ class PostgresAnalysisStore:
             cursor = connection.execute("UPDATE analyses SET payload = %s WHERE id = %s AND payload->>'state' = %s", (Jsonb(analysis), analysis_id, expected_state))
             return cursor.rowcount == 1
 
+    def claim_analysis_execution(self, analysis_id: str, delivery_id: str, retry_count: int) -> dict[str, Any] | None:
+        """Atomically claim execution, allowing only the same Redis delivery to resume after a crash."""
+        with psycopg.connect(self.database_url) as connection:
+            row = connection.execute("""
+                UPDATE analyses
+                SET payload = jsonb_set(
+                    jsonb_set(
+                        jsonb_set(payload, '{state}', to_jsonb('RESOLVING'::text)),
+                        '{retry_count}', to_jsonb(%s::int)
+                    ),
+                    '{execution_delivery_id}', to_jsonb(%s::text)
+                )
+                WHERE id = %s
+                  AND (
+                    payload->>'state' IN ('QUEUED', 'FAILED_RETRYABLE')
+                    OR (
+                        payload->>'state' IN ('RESOLVING', 'PARSING')
+                        AND payload->>'execution_delivery_id' = %s
+                    )
+                  )
+                RETURNING payload
+            """, (retry_count, delivery_id, analysis_id, delivery_id)).fetchone()
+        return self._payload(row)
+
     def put_card(self, card: dict[str, Any]) -> None:
         with psycopg.connect(self.database_url) as connection:
             connection.execute("""
