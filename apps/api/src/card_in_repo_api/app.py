@@ -7,6 +7,7 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from card_in_repo_analyzer import analyze_python, build_feature_map, split_python_symbol
+from .concepts import build_concept_candidates
 from .jobs import AnalysisJob, AnalysisJobQueue
 from .runtime import build_analysis_queue, build_analysis_store
 from .store import AnalysisStore
@@ -178,6 +179,17 @@ def get_files(analysis_id: str) -> dict[str, Any]:
         grouped.setdefault(path, []).append({key: symbol[key] for key in ("id", "name", "kind", "range") if key in symbol})
     files = [{"path": path, "symbols": grouped[path]} for path in sorted(grouped)]
     return {"analysis_id": analysis_id, "files": files}
+
+
+@app.get("/v1/analyses/{analysis_id}/concepts")
+def get_concepts(analysis_id: str) -> dict[str, Any]:
+    analysis = _STORE.get_analysis(analysis_id)
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="analysis not found")
+    if analysis.get("state") != "READY":
+        raise HTTPException(status_code=409, detail="concepts are available only after repository map is ready")
+    concepts = build_concept_candidates(analysis.get("facts") or {}, analysis.get("features") or [])
+    return {"analysis_id": analysis_id, "concepts": concepts}
 
 
 @app.get("/v1/cards/{card_id}")

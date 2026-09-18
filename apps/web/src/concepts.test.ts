@@ -1,4 +1,0 @@
-import {describe,expect,it} from 'vitest';
-import {buildConceptCandidates} from './concepts';
-
-describe('concept candidates',()=>{it('are derived only from feature flow and static file facts',()=>{const concepts=buildConceptCandidates([{id:'f1',name:'Load user',flow_steps:[{order:1,symbol_id:'s1',symbol_name:'entry'},{order:2,symbol_id:'s2',symbol_name:'load_user',relation:'calls'}]}],[{path:'app.py',symbols:[{id:'s1',name:'entry'}]},{path:'services/user.py',symbols:[{id:'s2',name:'load_user'}]}]);expect(concepts).toEqual([{id:'concept:flow:f1',name:'Load user',kind:'execution_flow',feature_id:'f1',evidence:[{symbol_id:'s1',symbol_name:'entry',path:'app.py',relation:undefined,order:1},{symbol_id:'s2',symbol_name:'load_user',path:'services/user.py',relation:'calls',order:2}]}])});it('does not invent concepts without execution evidence',()=>{expect(buildConceptCandidates([{id:'f1',name:'Empty',flow_steps:[]}],[])).toEqual([])})});

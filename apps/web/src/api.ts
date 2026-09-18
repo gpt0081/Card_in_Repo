@@ -3,6 +3,8 @@ export type FlowStep = { order: number; symbol_id: string; symbol_name?: string;
 export type Feature = { id: string; name: string; entry_symbol_id?: string; flow_steps: FlowStep[] };
 export type FileSymbol = { id: string; name: string; kind?: string; range?: {start?: {line?: number}; end?: {line?: number}} };
 export type RepositoryFile = { path: string; symbols: FileSymbol[] };
+export type ConceptEvidence = { symbol_id:string; symbol_name:string; path?:string; range?: {start?: {line?: number}; end?: {line?: number}}; relation?:string; order:number };
+export type ConceptCandidate = { id:string; name:string; kind:'execution_flow'; feature_id:string; evidence:ConceptEvidence[]; explanation:null };
 
 const base = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
@@ -16,3 +18,4 @@ export function submitRepository(repository_url: string) {
 export function getAnalysis(id: string) { return json<AnalysisState>(`/v1/analyses/${id}`); }
 export function getFeatures(id: string) { return json<{analysis_id:string;features:Feature[]}>(`/v1/analyses/${id}/features`); }
 export function getFiles(id: string) { return json<{analysis_id:string;files:RepositoryFile[]}>(`/v1/analyses/${id}/files`); }
+export function getConcepts(id: string) { return json<{analysis_id:string;concepts:ConceptCandidate[]}>(`/v1/analyses/${id}/concepts`); }

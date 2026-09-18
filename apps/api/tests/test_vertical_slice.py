@@ -32,17 +32,24 @@ def test_fixture_analysis_reaches_ready_feature_map_and_evidence_card():
     assert file_view.status_code == 200
     assert file_view.json()["files"][0]["path"] == "sample.py"
     assert {symbol["name"] for symbol in file_view.json()["files"][0]["symbols"]} == {"normalize", "load_user", "entry"}
+    concept_view = client.get(f"/v1/analyses/{body['id']}/concepts")
+    assert concept_view.status_code == 200
+    entry_concept = next(concept for concept in concept_view.json()["concepts"] if concept["name"] == "entry")
+    assert entry_concept["kind"] == "execution_flow"
+    assert entry_concept["explanation"] is None
+    assert [item["symbol_name"] for item in entry_concept["evidence"]] == ["entry", "load_user", "normalize"]
+    assert all(item["path"] == "sample.py" for item in entry_concept["evidence"])
     payload = client.get(f"/v1/cards/{body['card_ids'][0]}").json()
     assert payload["basic_explanation"]["status"] == "STUB_VERIFIED"
 
 
-def test_file_structure_is_gated_until_repository_map_is_ready():
+def test_file_structure_and_concepts_are_gated_until_repository_map_is_ready():
     app_module = import_module("card_in_repo_api.app")
     store = MemoryAnalysisStore()
     app_module.set_store(store)
-    store.put_analysis({"id": "queued-files", "state": "QUEUED", "facts": {}})
-    response = client.get("/v1/analyses/queued-files/files")
-    assert response.status_code == 409
+    store.put_analysis({"id": "queued-views", "state": "QUEUED", "facts": {}, "features": []})
+    assert client.get("/v1/analyses/queued-views/files").status_code == 409
+    assert client.get("/v1/analyses/queued-views/concepts").status_code == 409
 
 
 def test_fixture_analysis_rejects_unsupported_language():
