@@ -73,9 +73,7 @@ def store_completed_analysis(repository: str, commit_sha: str, files: dict[str, 
     previous = _STORE.get_analysis(analysis_id) or {}
     previous.pop("error", None)
     analysis = {**previous, "id": analysis_id, "state": "READY", "repository": repository, "commit_sha": commit_sha, "facts": facts, "features": features, "card_ids": [card["id"] for card in cards]}
-    _STORE.put_analysis(analysis)
-    for card in cards:
-        _STORE.put_card(card)
+    _STORE.put_completed_analysis(analysis, cards)
     return {"id": analysis_id, "state": "READY", "card_ids": analysis["card_ids"]}
 
 
