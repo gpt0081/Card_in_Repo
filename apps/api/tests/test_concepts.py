@@ -21,13 +21,24 @@ def test_concepts_are_derived_only_from_static_evidence():
     concepts = build_concept_candidates(facts, features)
 
     assert len(concepts) == 1
-    assert concepts[0]["id"] == "concept:flow:feature:entry"
-    assert concepts[0]["kind"] == "execution_flow"
-    assert concepts[0]["explanation"] is None
-    assert concepts[0]["evidence"] == [
-        {"symbol_id": "sym:entry", "symbol_name": "entry", "path": "app.py", "range": facts["symbols"][0]["range"], "relation": "entry", "order": 0},
-        {"symbol_id": "sym:load", "symbol_name": "load", "path": "service.py", "range": facts["symbols"][1]["range"], "relation": "calls", "order": 1},
+    concept = concepts[0]
+    assert concept["id"] == "concept:flow:feature:entry"
+    assert concept["kind"] == "execution_flow"
+    assert concept["evidence"] == [
+        {"id": "concept:flow:feature:entry:evidence:0", "symbol_id": "sym:entry", "symbol_name": "entry", "path": "app.py", "range": facts["symbols"][0]["range"], "relation": "entry", "order": 0},
+        {"id": "concept:flow:feature:entry:evidence:1", "symbol_id": "sym:load", "symbol_name": "load", "path": "service.py", "range": facts["symbols"][1]["range"], "relation": "calls", "order": 1},
     ]
+    assert concept["explanation"] == {
+        "level": "basic",
+        "claims": [{
+            "text": "This flow runs in this analyzed order: entry → load.",
+            "evidence_ids": [
+                "concept:flow:feature:entry:evidence:0",
+                "concept:flow:feature:entry:evidence:1",
+            ],
+        }],
+        "verified": True,
+    }
 
 
 def test_concepts_are_not_invented_without_resolved_symbols():
