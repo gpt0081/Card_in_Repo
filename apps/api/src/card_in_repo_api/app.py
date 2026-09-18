@@ -44,7 +44,7 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-def store_completed_analysis(repository: str, commit_sha: str, files: dict[str, str], facts: dict[str, Any], analysis_id: str | None = None) -> dict[str, Any]:
+def store_completed_analysis(repository: str, commit_sha: str, files: dict[str, str], facts: dict[str, Any], analysis_id: str | None = None, expected_delivery_id: str | None = None) -> dict[str, Any]:
     features = build_feature_map(facts)
     analysis_id = analysis_id or str(uuid4())
     cards: list[dict[str, Any]] = []
@@ -73,7 +73,8 @@ def store_completed_analysis(repository: str, commit_sha: str, files: dict[str, 
     previous = _STORE.get_analysis(analysis_id) or {}
     previous.pop("error", None)
     analysis = {**previous, "id": analysis_id, "state": "READY", "repository": repository, "commit_sha": commit_sha, "facts": facts, "features": features, "card_ids": [card["id"] for card in cards]}
-    _STORE.put_completed_analysis(analysis, cards)
+    if not _STORE.put_completed_analysis(analysis, cards, expected_delivery_id=expected_delivery_id):
+        raise RuntimeError("analysis execution ownership changed before READY commit")
     return {"id": analysis_id, "state": "READY", "card_ids": analysis["card_ids"]}
 
 
