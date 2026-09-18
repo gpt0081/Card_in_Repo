@@ -6,7 +6,6 @@ from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-
 from card_in_repo_analyzer import analyze_python, build_feature_map, split_python_symbol
 from .jobs import AnalysisJob, AnalysisJobQueue
 from .runtime import build_analysis_queue, build_analysis_store
@@ -80,6 +79,23 @@ def store_completed_analysis(repository: str, commit_sha: str, files: dict[str, 
     return {"id": analysis_id, "state": "READY", "card_ids": analysis["card_ids"]}
 
 
+def _persist_job(analysis: dict[str, Any], job: AnalysisJob, expected_state: str | None = None) -> bool:
+    durable = getattr(_STORE, "put_analysis_with_job", None)
+    if durable is not None:
+        return durable(analysis, {"analysis_id": job.analysis_id, "repository_url": job.repository_url, "ref": job.ref}, expected_state=expected_state)
+    if expected_state is None:
+        _STORE.put_analysis(analysis)
+    elif not _STORE.transition_analysis(analysis["id"], expected_state, analysis):
+        return False
+    try:
+        _QUEUE.enqueue(job)
+    except Exception:
+        if expected_state is not None:
+            return False
+        raise
+    return True
+
+
 def _analyze_source(repository: str, commit_sha: str, path: str, source: str) -> dict[str, Any]:
     if not path.endswith(".py"):
         raise HTTPException(status_code=422, detail="fixture slice supports Python files only")
@@ -97,13 +113,12 @@ def create_fixture_analysis(request: FixtureAnalysisRequest) -> dict[str, Any]:
 def create_github_analysis(request: GitHubAnalysisRequest) -> dict[str, Any]:
     analysis_id = str(uuid4())
     queued = {"id": analysis_id, "state": "QUEUED", "repository": request.repository_url, "source_repository_url": request.repository_url, "source_ref": request.ref, "commit_sha": None, "facts": {}, "features": [], "card_ids": [], "retry_count": 0}
-    _STORE.put_analysis(queued)
+    job = AnalysisJob(analysis_id, request.repository_url, request.ref)
     try:
-        _QUEUE.enqueue(AnalysisJob(analysis_id=analysis_id, repository_url=request.repository_url, ref=request.ref))
+        if not _persist_job(queued, job):
+            raise RuntimeError("analysis id collision")
     except Exception as exc:
-        failed = {**queued, "state": "FAILED_RETRYABLE", "error": "analysis queue unavailable"}
-        _STORE.put_analysis(failed)
-        raise HTTPException(status_code=503, detail="analysis queue unavailable") from exc
+        raise HTTPException(status_code=503, detail="analysis submission unavailable") from exc
     return {"id": analysis_id, "state": "QUEUED"}
 
 
@@ -121,16 +136,12 @@ def requeue_exhausted_analysis(analysis_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail="analysis predates requeue source metadata")
     queued = {**analysis, "state": "QUEUED", "retry_count": 0, "requeued": True}
     queued.pop("error", None)
-    if not _STORE.transition_analysis(analysis_id, "FAILED_EXHAUSTED", queued):
+    job = AnalysisJob(analysis_id, repository_url, analysis.get("source_ref"))
+    if not _persist_job(queued, job, expected_state="FAILED_EXHAUSTED"):
         current = _STORE.get_analysis(analysis_id)
         if current and current.get("state") == "QUEUED" and current.get("requeued"):
             return {"id": analysis_id, "state": "QUEUED"}
         raise HTTPException(status_code=409, detail="analysis state changed during requeue")
-    try:
-        _QUEUE.enqueue(AnalysisJob(analysis_id=analysis_id, repository_url=repository_url, ref=analysis.get("source_ref")))
-    except Exception as exc:
-        _STORE.transition_analysis(analysis_id, "QUEUED", analysis)
-        raise HTTPException(status_code=503, detail="analysis queue unavailable") from exc
     return {"id": analysis_id, "state": "QUEUED"}
 
 
