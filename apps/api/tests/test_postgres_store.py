@@ -69,6 +69,36 @@ def test_postgres_execution_claim_has_single_delivery_owner() -> None:
     assert resumed["retry_count"] == 1
 
 
+def test_completed_analysis_and_cards_rollback_together() -> None:
+    store = PostgresAnalysisStore(DATABASE_URL); store.initialize()
+    parsing = {"id": "analysis:atomic-ready", "state": "PARSING"}
+    ready = {"id": parsing["id"], "state": "READY", "card_ids": ["card:atomic-good", "card:atomic-bad"]}
+    good = {"id": "card:atomic-good", "analysis_id": parsing["id"], "source": "pass"}
+    bad = {"id": "card:atomic-bad", "analysis_id": "analysis:wrong-owner", "source": "pass"}
+    store.put_analysis(parsing)
+
+    with pytest.raises(ValueError):
+        store.put_completed_analysis(ready, [good, bad])
+
+    assert store.get_analysis(parsing["id"]) == parsing
+    assert store.get_card(good["id"]) is None
+
+
+def test_completed_analysis_publishes_ready_with_all_cards() -> None:
+    store = PostgresAnalysisStore(DATABASE_URL); store.initialize()
+    parsing = {"id": "analysis:atomic-success", "state": "PARSING"}
+    cards = [
+        {"id": "card:atomic-1", "analysis_id": parsing["id"], "source": "one"},
+        {"id": "card:atomic-2", "analysis_id": parsing["id"], "source": "two"},
+    ]
+    ready = {"id": parsing["id"], "state": "READY", "card_ids": [card["id"] for card in cards]}
+    store.put_analysis(parsing)
+    store.put_completed_analysis(ready, cards)
+
+    assert store.get_analysis(parsing["id"]) == ready
+    assert [store.get_card(card["id"]) for card in cards] == cards
+
+
 def test_card_requires_existing_analysis() -> None:
     store = PostgresAnalysisStore(DATABASE_URL); store.initialize()
     orphan = {"id": "card:orphan", "analysis_id": "analysis:does-not-exist", "source": "pass"}
