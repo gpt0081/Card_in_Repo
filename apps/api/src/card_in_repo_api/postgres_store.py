@@ -122,9 +122,19 @@ class PostgresAnalysisStore:
             """, (retry_count, delivery_id, analysis_id, delivery_id)).fetchone()
         return self._payload(row)
 
-    def put_completed_analysis(self, analysis: dict[str, Any], cards: list[dict[str, Any]]) -> None:
-        """Commit all cards before exposing READY, in one PostgreSQL transaction."""
+    def put_completed_analysis(self, analysis: dict[str, Any], cards: list[dict[str, Any]], *, expected_delivery_id: str | None = None) -> bool:
+        """Commit cards + READY atomically, optionally requiring the current execution owner."""
         with psycopg.connect(self.database_url) as connection:
+            if expected_delivery_id is not None:
+                owner = connection.execute("""
+                    SELECT 1 FROM analyses
+                    WHERE id = %s
+                      AND payload->>'state' = 'PARSING'
+                      AND payload->>'execution_delivery_id' = %s
+                    FOR UPDATE
+                """, (analysis["id"], expected_delivery_id)).fetchone()
+                if owner is None:
+                    return False
             for card in cards:
                 if card["analysis_id"] != analysis["id"]:
                     raise ValueError("card belongs to a different analysis")
@@ -132,10 +142,21 @@ class PostgresAnalysisStore:
                     INSERT INTO cards (id, analysis_id, payload) VALUES (%s, %s, %s)
                     ON CONFLICT (id) DO UPDATE SET analysis_id = EXCLUDED.analysis_id, payload = EXCLUDED.payload
                 """, (card["id"], card["analysis_id"], Jsonb(card)))
-            connection.execute("""
-                INSERT INTO analyses (id, payload) VALUES (%s, %s)
-                ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload
-            """, (analysis["id"], Jsonb(analysis)))
+            if expected_delivery_id is None:
+                connection.execute("""
+                    INSERT INTO analyses (id, payload) VALUES (%s, %s)
+                    ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload
+                """, (analysis["id"], Jsonb(analysis)))
+            else:
+                cursor = connection.execute("""
+                    UPDATE analyses SET payload = %s
+                    WHERE id = %s
+                      AND payload->>'state' = 'PARSING'
+                      AND payload->>'execution_delivery_id' = %s
+                """, (Jsonb(analysis), analysis["id"], expected_delivery_id))
+                if cursor.rowcount != 1:
+                    raise RuntimeError("analysis execution ownership changed during completion")
+            return True
 
     def put_card(self, card: dict[str, Any]) -> None:
         with psycopg.connect(self.database_url) as connection:
