@@ -38,6 +38,28 @@ def test_retryable_failure_is_dead_lettered_after_bounded_attempts(monkeypatch):
     assert queue.dead_letters[0][0].analysis_id == analysis_id
 
 
+def test_distinct_duplicate_delivery_does_not_overlap_active_execution(monkeypatch):
+    worker = import_module("card_in_repo_api.worker")
+    store = MemoryAnalysisStore()
+    queue = MemoryAnalysisJobQueue()
+    job = AnalysisJob("analysis-duplicate", "https://github.com/octo/demo")
+    store.put_analysis({"id": job.analysis_id, "state": "QUEUED", "repository_url": job.repository_url})
+    queue.enqueue(job)
+    queue.enqueue(job)
+
+    winning_delivery = queue.claim(timeout_seconds=0)
+    assert winning_delivery is not None
+    assert store.claim_analysis_execution(job.analysis_id, winning_delivery.delivery_id, 0) is not None
+
+    monkeypatch.setattr(worker, "_STORE", store)
+    monkeypatch.setattr(worker, "resolve_github_repository", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("duplicate must not execute")))
+
+    assert worker.run_one(queue, timeout_seconds=0) is True
+    active = store.get_analysis(job.analysis_id)
+    assert active["state"] == "RESOLVING"
+    assert active["execution_delivery_id"] == winning_delivery.delivery_id
+
+
 def test_retry_budget_must_be_positive(monkeypatch):
     worker = import_module("card_in_repo_api.worker")
     monkeypatch.setenv("CARD_IN_REPO_MAX_ANALYSIS_ATTEMPTS", "0")
