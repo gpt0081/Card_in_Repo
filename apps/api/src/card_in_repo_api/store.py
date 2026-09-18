@@ -12,7 +12,7 @@ class AnalysisStore(Protocol):
     def get_analysis(self, analysis_id: str) -> dict[str, Any] | None: ...
     def transition_analysis(self, analysis_id: str, expected_state: str, analysis: dict[str, Any]) -> bool: ...
     def claim_analysis_execution(self, analysis_id: str, delivery_id: str, retry_count: int) -> dict[str, Any] | None: ...
-    def put_completed_analysis(self, analysis: dict[str, Any], cards: list[dict[str, Any]]) -> None: ...
+    def put_completed_analysis(self, analysis: dict[str, Any], cards: list[dict[str, Any]], *, expected_delivery_id: str | None = None) -> bool: ...
     def put_card(self, card: dict[str, Any]) -> None: ...
     def get_card(self, card_id: str) -> dict[str, Any] | None: ...
 
@@ -56,15 +56,23 @@ class MemoryAnalysisStore:
             self._analyses[analysis_id] = deepcopy(claimed)
             return deepcopy(claimed)
 
-    def put_completed_analysis(self, analysis: dict[str, Any], cards: list[dict[str, Any]]) -> None:
-        """Publish cards and READY analysis together under the same store lock."""
+    def put_completed_analysis(self, analysis: dict[str, Any], cards: list[dict[str, Any]], *, expected_delivery_id: str | None = None) -> bool:
+        """Publish cards and READY analysis only while the caller still owns execution."""
         with self._lock:
+            current = self._analyses.get(analysis["id"])
+            if expected_delivery_id is not None and (
+                current is None
+                or current.get("state") != "PARSING"
+                or current.get("execution_delivery_id") != expected_delivery_id
+            ):
+                return False
             for card in cards:
                 if card["analysis_id"] != analysis["id"]:
                     raise ValueError("card belongs to a different analysis")
             for card in cards:
                 self._cards[card["id"]] = deepcopy(card)
             self._analyses[analysis["id"]] = deepcopy(analysis)
+            return True
 
     def put_card(self, card: dict[str, Any]) -> None:
         with self._lock:

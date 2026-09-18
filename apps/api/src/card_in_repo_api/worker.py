@@ -46,7 +46,14 @@ def run_one(queue: AnalysisJobQueue | None = None, timeout_seconds: int = 5) -> 
         snapshot = resolve_github_repository(job.repository_url, job.ref)
         _STORE.put_analysis({**current, "state": "PARSING", "repository": snapshot.repository, "commit_sha": snapshot.commit_sha})
         facts = analyze_python_repository(snapshot.files)
-        store_completed_analysis(snapshot.repository, snapshot.commit_sha, snapshot.files, facts, analysis_id=job.analysis_id)
+        store_completed_analysis(
+            snapshot.repository,
+            snapshot.commit_sha,
+            snapshot.files,
+            facts,
+            analysis_id=job.analysis_id,
+            expected_delivery_id=delivery.delivery_id,
+        )
     except GitHubSourceError as exc:
         latest = _STORE.get_analysis(job.analysis_id) or current
         _STORE.put_analysis({**latest, "state": "FAILED_TERMINAL", "retry_count": delivery.attempts - 1, "error": str(exc)})
