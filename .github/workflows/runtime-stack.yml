@@ -12,6 +12,12 @@ jobs:
       CARD_IN_REPO_GITHUB_TOKEN: ${{ github.token }}
       CARD_IN_REPO_TEACHING_PROVIDER: deterministic_test
       CARD_IN_REPO_ALLOW_TEST_PROVIDER: "1"
+      CARD_IN_REPO_GITHUB_CLIENT_ID: ci-client
+      CARD_IN_REPO_GITHUB_CLIENT_SECRET: ci-client-secret
+      CARD_IN_REPO_SESSION_SECRET: ci-session-secret
+      CARD_IN_REPO_GITHUB_CALLBACK_URL: http://127.0.0.1:8080/v1/auth/github/callback
+      CARD_IN_REPO_APP_URL: http://127.0.0.1:8080/
+      CARD_IN_REPO_INSECURE_COOKIE: "1"
     steps:
       - uses: actions/checkout@v4
       - name: Validate Compose model
@@ -32,10 +38,11 @@ jobs:
         run: |
           npm install
           npx playwright install --with-deps chromium
-      - name: Drive public repository through verified on-demand teaching
+      - name: Drive public repository and authenticated session through browser
         working-directory: apps/web
         env:
           E2E_BASE_URL: http://127.0.0.1:8080
+          E2E_SESSION_SECRET: ci-session-secret
         run: npm run test:e2e
       - name: Show logs on failure
         if: failure()
