@@ -192,6 +192,21 @@ def get_concepts(analysis_id: str) -> dict[str, Any]:
     return {"analysis_id": analysis_id, "concepts": concepts}
 
 
+@app.get("/v1/analyses/{analysis_id}/cards")
+def get_analysis_cards(analysis_id: str) -> dict[str, Any]:
+    analysis = _STORE.get_analysis(analysis_id)
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="analysis not found")
+    if analysis.get("state") != "READY":
+        raise HTTPException(status_code=409, detail="cards are available only after repository map is ready")
+    cards = []
+    for card_id in analysis.get("card_ids", []):
+        card = _STORE.get_card(card_id)
+        if card is not None:
+            cards.append(card)
+    return {"analysis_id": analysis_id, "cards": cards}
+
+
 @app.get("/v1/cards/{card_id}")
 def get_card(card_id: str) -> dict[str, Any]:
     card = _STORE.get_card(card_id)
