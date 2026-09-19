@@ -43,12 +43,7 @@ def _execution_order(item: dict[str, Any]) -> tuple[bool, int]:
 
 
 def build_basic_explanation(concept: dict[str, Any]) -> dict[str, Any]:
-    """Create the MVP Basic teaching layer from verified execution evidence.
-
-    This deterministic generator keeps the first runnable slice provider-independent.
-    A later LLM adapter may replace the wording, but must submit the same structured
-    claims to ``verify_explanation`` before anything is shown to the learner.
-    """
+    """Create the MVP Basic teaching layer from verified execution evidence."""
     evidence = concept.get("evidence", [])
     available = {item["id"] for item in evidence if item.get("id")}
     if not available:
@@ -62,6 +57,28 @@ def build_basic_explanation(concept: dict[str, Any]) -> dict[str, Any]:
         "claims": [{
             "text": f"This flow runs in this analyzed order: {path}.",
             "evidence_ids": [item["id"] for item in ordered],
+        }],
+        "verified": False,
+    }
+    return verify_explanation(explanation, available)
+
+
+def build_card_basic_explanation(card: dict[str, Any]) -> dict[str, Any]:
+    """Teach only source-range facts that can be cited by this card."""
+    evidence = card.get("evidence", [])
+    available = {item["id"] for item in evidence if item.get("id")}
+    if not available:
+        raise UnverifiedExplanation("cannot teach a card without source evidence")
+    segment = card.get("segment") or {}
+    index = int(segment.get("index", 0)) + 1
+    count = int(segment.get("count", 1))
+    start = card["range"]["start"]["line"]
+    end = card["range"]["end"]["line"]
+    explanation = {
+        "level": "basic",
+        "claims": [{
+            "text": f"This is {card['symbol_name']} segment {index} of {count}, covering {card['path']} lines {start}–{end}.",
+            "evidence_ids": sorted(available),
         }],
         "verified": False,
     }
