@@ -44,6 +44,8 @@ services:
       DATABASE_URL: postgresql://card_in_repo:card_in_repo@postgres:5432/card_in_repo
       CARD_IN_REPO_QUEUE: redis
       REDIS_URL: redis://redis:6379/0
+      CARD_IN_REPO_TEACHING_PROVIDER: ${CARD_IN_REPO_TEACHING_PROVIDER:-none}
+      CARD_IN_REPO_ALLOW_TEST_PROVIDER: ${CARD_IN_REPO_ALLOW_TEST_PROVIDER:-0}
     ports: ["8000:8000"]
     depends_on:
       postgres: {condition: service_healthy}
