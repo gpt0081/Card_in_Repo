@@ -44,7 +44,12 @@ def test_fixture_analysis_reaches_ready_feature_map_and_evidence_card():
     evidence_ids = {item["id"] for item in entry_concept["evidence"]}
     assert set(explanation["claims"][0]["evidence_ids"]) == evidence_ids
     payload = client.get(f"/v1/cards/{body['card_ids'][0]}").json()
-    assert payload["basic_explanation"]["status"] == "STUB_VERIFIED"
+    card_explanation = payload["basic_explanation"]
+    assert card_explanation["level"] == "basic"
+    assert card_explanation["verified"] is True
+    card_evidence_ids = {item["id"] for item in payload["evidence"]}
+    assert card_explanation["claims"]
+    assert all(set(claim["evidence_ids"]) <= card_evidence_ids for claim in card_explanation["claims"])
 
 
 def test_file_structure_and_concepts_are_gated_until_repository_map_is_ready():
