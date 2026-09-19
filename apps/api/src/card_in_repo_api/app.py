@@ -9,14 +9,15 @@ from pydantic import BaseModel
 from card_in_repo_analyzer import analyze_python, build_feature_map, split_python_symbol
 from .concepts import build_concept_candidates
 from .jobs import AnalysisJob, AnalysisJobQueue
-from .runtime import build_analysis_queue, build_analysis_store
+from .runtime import build_analysis_queue, build_analysis_store, build_teaching_provider
 from .store import AnalysisStore
 from .teaching import TeachingProvider, UnverifiedExplanation, build_card_basic_explanation, verify_on_demand_card_explanation
+from .teaching_provider import TeachingProviderError
 
 app = FastAPI(title="Card in Repo API", version="0.1.0")
 _STORE: AnalysisStore = build_analysis_store()
 _QUEUE: AnalysisJobQueue = build_analysis_queue()
-_TEACHING_PROVIDER: TeachingProvider | None = None
+_TEACHING_PROVIDER: TeachingProvider | None = build_teaching_provider()
 
 
 def set_store(store: AnalysisStore) -> None:
@@ -43,8 +44,60 @@ class FixtureAnalysisRequest(BaseModel):
 
 
 class GitHubAnalysisRequest(BaseModel):
-    repository_url: str
-    ref: str | None = None
+    repository: str
+    ref: str = "HEAD"
+
+
+class FixtureMultiFileAnalysisRequest(BaseModel):
+    repository: str = "fixture/card-in-repo"
+    commit_sha: str
+    files: dict[str, str]
+
+
+def _analysis_id(repository: str, commit_sha: str) -> str:
+    digest = sha256(f"{repository}@{commit_sha}".encode()).hexdigest()[:16]
+    return f"analysis:{digest}"
+
+
+def _persist_analysis(
+    *,
+    analysis_id: str,
+    repository: str,
+    commit_sha: str,
+    files: dict[str, str],
+) -> dict[str, Any]:
+    from card_in_repo_analyzer import analyze_python_files
+
+    result = analyze_python_files(files)
+    feature_map = build_feature_map(result)
+    cards: list[dict[str, Any]] = []
+    for symbol in result["symbols"]:
+        if symbol["kind"] not in {"function", "method"}:
+            continue
+        source = files[symbol["path"]]
+        for card in split_python_symbol(source, symbol):
+            card_id = f"card:{uuid4().hex}"
+            evidence = [{
+                "id": f"{card_id}:source-range",
+                "type": "SOURCE_RANGE",
+                "path": card["path"],
+                "range": card["range"],
+            }]
+            card_record = {"id": card_id, **card, "evidence": evidence}
+            card_record["explanation"] = build_card_basic_explanation(card_record)
+            cards.append(card_record)
+    payload = {
+        "id": analysis_id,
+        "repository": repository,
+        "commit_sha": commit_sha,
+        "status": "READY",
+        "analysis": result,
+        "feature_map": feature_map,
+        "files": files,
+        "cards": cards,
+    }
+    _STORE.save_analysis(payload)
+    return payload
 
 
 @app.get("/health")
@@ -52,105 +105,43 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-def store_completed_analysis(repository: str, commit_sha: str, files: dict[str, str], facts: dict[str, Any], analysis_id: str | None = None, expected_delivery_id: str | None = None) -> dict[str, Any]:
-    features = build_feature_map(facts)
-    analysis_id = analysis_id or str(uuid4())
-    cards: list[dict[str, Any]] = []
-    symbols = {symbol["id"]: symbol for symbol in facts["symbols"]}
-    symbol_paths = facts.get("symbol_paths", {symbol_id: next(iter(files)) for symbol_id in symbols})
-    for feature in features:
-        for step in feature["flow_steps"]:
-            symbol = symbols[step["symbol_id"]]
-            path = symbol_paths[symbol["id"]]
-            source = files[path]
-            segments = split_python_symbol(source, symbol)
-            symbol_cards: list[dict[str, Any]] = []
-            for segment_index, segment in enumerate(segments):
-                start, end = segment["start_line"], segment["end_line"]
-                excerpt = "\n".join(source.splitlines()[start - 1:end])
-                evidence_id = f"evidence:{sha256((commit_sha + path + str(start) + str(end)).encode()).hexdigest()[:16]}"
-                card_id = f"card:{sha256((analysis_id + symbol['id'] + str(segment_index)).encode()).hexdigest()[:16]}"
-                card_range = {"start": {"line": start}, "end": {"line": end}}
-                card = {"id": card_id, "analysis_id": analysis_id, "repository": repository, "commit_sha": commit_sha, "path": path, "symbol_id": symbol["id"], "symbol_name": symbol["name"], "range": card_range, "parent_symbol_range": symbol["range"], "segment": {"index": segment_index, "count": len(segments), "previous_card_id": None, "next_card_id": None}, "source": excerpt, "evidence": [{"id": evidence_id, "type": "SOURCE_RANGE", "path": path, "range": card_range}]}
-                card["basic_explanation"] = build_card_basic_explanation(card)
-                if symbol_cards:
-                    previous = symbol_cards[-1]
-                    card["segment"]["previous_card_id"] = previous["id"]
-                    previous["segment"]["next_card_id"] = card_id
-                symbol_cards.append(card)
-            cards.extend(symbol_cards)
-    previous = _STORE.get_analysis(analysis_id) or {}
-    previous.pop("error", None)
-    analysis = {**previous, "id": analysis_id, "state": "READY", "repository": repository, "commit_sha": commit_sha, "facts": facts, "features": features, "card_ids": [card["id"] for card in cards]}
-    if not _STORE.put_completed_analysis(analysis, cards, expected_delivery_id=expected_delivery_id):
-        raise RuntimeError("analysis execution ownership changed before READY commit")
-    return {"id": analysis_id, "state": "READY", "card_ids": analysis["card_ids"]}
-
-
-def _persist_job(analysis: dict[str, Any], job: AnalysisJob, expected_state: str | None = None) -> bool:
-    durable = getattr(_STORE, "put_analysis_with_job", None)
-    if durable is not None:
-        return durable(analysis, {"analysis_id": job.analysis_id, "repository_url": job.repository_url, "ref": job.ref}, expected_state=expected_state)
-    if expected_state is None:
-        _STORE.put_analysis(analysis)
-    elif not _STORE.transition_analysis(analysis["id"], expected_state, analysis):
-        return False
-    try:
-        _QUEUE.enqueue(job)
-    except Exception:
-        if expected_state is not None:
-            return False
-        raise
-    return True
-
-
-def _analyze_source(repository: str, commit_sha: str, path: str, source: str) -> dict[str, Any]:
-    if not path.endswith(".py"):
-        raise HTTPException(status_code=422, detail="fixture slice supports Python files only")
-    return store_completed_analysis(repository, commit_sha, {path: source}, analyze_python(path, source))
-
-
 @app.post("/v1/fixture-analyses", status_code=201)
 def create_fixture_analysis(request: FixtureAnalysisRequest) -> dict[str, Any]:
-    if request.language != "python":
-        raise HTTPException(status_code=422, detail="fixture slice supports python only")
-    return _analyze_source(request.repository, request.commit_sha, request.path, request.source)
+    analysis_id = _analysis_id(request.repository, request.commit_sha)
+    payload = _persist_analysis(
+        analysis_id=analysis_id,
+        repository=request.repository,
+        commit_sha=request.commit_sha,
+        files={request.path: request.source},
+    )
+    return {"analysis_id": analysis_id, "status": payload["status"], "card_ids": [c["id"] for c in payload["cards"]]}
+
+
+@app.post("/v1/fixture-multi-file-analyses", status_code=201)
+def create_fixture_multi_file_analysis(request: FixtureMultiFileAnalysisRequest) -> dict[str, Any]:
+    analysis_id = _analysis_id(request.repository, request.commit_sha)
+    payload = _persist_analysis(
+        analysis_id=analysis_id,
+        repository=request.repository,
+        commit_sha=request.commit_sha,
+        files=request.files,
+    )
+    return {"analysis_id": analysis_id, "status": payload["status"], "card_ids": [c["id"] for c in payload["cards"]]}
 
 
 @app.post("/v1/analyses", status_code=202)
-def create_github_analysis(request: GitHubAnalysisRequest) -> dict[str, Any]:
-    analysis_id = str(uuid4())
-    queued = {"id": analysis_id, "state": "QUEUED", "repository": request.repository_url, "source_repository_url": request.repository_url, "source_ref": request.ref, "commit_sha": None, "facts": {}, "features": [], "card_ids": [], "retry_count": 0}
-    job = AnalysisJob(analysis_id, request.repository_url, request.ref)
-    try:
-        if not _persist_job(queued, job):
-            raise RuntimeError("analysis id collision")
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="analysis submission unavailable") from exc
-    return {"id": analysis_id, "state": "QUEUED"}
-
-
-@app.post("/v1/analyses/{analysis_id}/requeue", status_code=202)
-def requeue_exhausted_analysis(analysis_id: str) -> dict[str, Any]:
-    analysis = _STORE.get_analysis(analysis_id)
-    if analysis is None:
-        raise HTTPException(status_code=404, detail="analysis not found")
-    if analysis.get("state") == "QUEUED" and analysis.get("requeued"):
-        return {"id": analysis_id, "state": "QUEUED"}
-    if analysis.get("state") != "FAILED_EXHAUSTED":
-        raise HTTPException(status_code=409, detail="only exhausted analyses can be requeued")
-    repository_url = analysis.get("source_repository_url")
-    if not repository_url:
-        raise HTTPException(status_code=409, detail="analysis predates requeue source metadata")
-    queued = {**analysis, "state": "QUEUED", "retry_count": 0, "requeued": True}
-    queued.pop("error", None)
-    job = AnalysisJob(analysis_id, repository_url, analysis.get("source_ref"))
-    if not _persist_job(queued, job, expected_state="FAILED_EXHAUSTED"):
-        current = _STORE.get_analysis(analysis_id)
-        if current and current.get("state") == "QUEUED" and current.get("requeued"):
-            return {"id": analysis_id, "state": "QUEUED"}
-        raise HTTPException(status_code=409, detail="analysis state changed during requeue")
-    return {"id": analysis_id, "state": "QUEUED"}
+def create_analysis(request: GitHubAnalysisRequest) -> dict[str, Any]:
+    analysis_id = f"analysis:{uuid4().hex}"
+    payload = {
+        "id": analysis_id,
+        "repository": request.repository,
+        "requested_ref": request.ref,
+        "status": "QUEUED",
+        "cards": [],
+    }
+    _STORE.save_analysis(payload)
+    _QUEUE.enqueue(AnalysisJob(analysis_id=analysis_id, repository=request.repository, requested_ref=request.ref))
+    return {"analysis_id": analysis_id, "status": "QUEUED"}
 
 
 @app.get("/v1/analyses/{analysis_id}")
@@ -158,45 +149,58 @@ def get_analysis(analysis_id: str) -> dict[str, Any]:
     analysis = _STORE.get_analysis(analysis_id)
     if analysis is None:
         raise HTTPException(status_code=404, detail="analysis not found")
-    return {key: analysis.get(key) for key in ("id", "state", "repository", "commit_sha", "retry_count", "error") if key in analysis}
+    return analysis
 
 
 @app.get("/v1/analyses/{analysis_id}/features")
-def get_features(analysis_id: str) -> dict[str, Any]:
+def get_analysis_features(analysis_id: str) -> dict[str, Any]:
     analysis = _STORE.get_analysis(analysis_id)
     if analysis is None:
         raise HTTPException(status_code=404, detail="analysis not found")
-    return {"analysis_id": analysis_id, "features": analysis.get("features", [])}
+    if analysis.get("status") != "READY":
+        raise HTTPException(status_code=409, detail="analysis is not ready")
+    return {"analysis_id": analysis_id, "features": analysis.get("feature_map", {}).get("features", [])}
 
 
 @app.get("/v1/analyses/{analysis_id}/files")
-def get_files(analysis_id: str) -> dict[str, Any]:
+def get_analysis_files(analysis_id: str) -> dict[str, Any]:
     analysis = _STORE.get_analysis(analysis_id)
     if analysis is None:
         raise HTTPException(status_code=404, detail="analysis not found")
-    if analysis.get("state") != "READY":
-        raise HTTPException(status_code=409, detail="file structure is available only after repository map is ready")
-    facts = analysis.get("facts") or {}
-    symbols = facts.get("symbols") or []
-    symbol_paths = facts.get("symbol_paths") or {}
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for symbol in symbols:
-        path = symbol_paths.get(symbol.get("id"))
-        if not path:
-            continue
-        grouped.setdefault(path, []).append({key: symbol[key] for key in ("id", "name", "kind", "range") if key in symbol})
-    files = [{"path": path, "symbols": grouped[path]} for path in sorted(grouped)]
-    return {"analysis_id": analysis_id, "files": files}
+    if analysis.get("status") != "READY":
+        raise HTTPException(status_code=409, detail="analysis is not ready")
+    facts = analysis.get("analysis", {})
+    symbols = facts.get("symbols", [])
+    paths = sorted({item.get("path") for item in symbols if item.get("path")})
+    return {
+        "analysis_id": analysis_id,
+        "files": [
+            {
+                "path": path,
+                "symbols": [
+                    {
+                        "id": symbol.get("id"),
+                        "name": symbol.get("name"),
+                        "kind": symbol.get("kind"),
+                        "range": symbol.get("range"),
+                    }
+                    for symbol in symbols
+                    if symbol.get("path") == path
+                ],
+            }
+            for path in paths
+        ],
+    }
 
 
 @app.get("/v1/analyses/{analysis_id}/concepts")
-def get_concepts(analysis_id: str) -> dict[str, Any]:
+def get_analysis_concepts(analysis_id: str) -> dict[str, Any]:
     analysis = _STORE.get_analysis(analysis_id)
     if analysis is None:
         raise HTTPException(status_code=404, detail="analysis not found")
-    if analysis.get("state") != "READY":
-        raise HTTPException(status_code=409, detail="concepts are available only after repository map is ready")
-    concepts = build_concept_candidates(analysis.get("facts") or {}, analysis.get("features") or [])
+    if analysis.get("status") != "READY":
+        raise HTTPException(status_code=409, detail="analysis is not ready")
+    concepts = build_concept_candidates(analysis.get("analysis", {}), analysis.get("feature_map", {}))
     return {"analysis_id": analysis_id, "concepts": concepts}
 
 
@@ -205,13 +209,9 @@ def get_analysis_cards(analysis_id: str) -> dict[str, Any]:
     analysis = _STORE.get_analysis(analysis_id)
     if analysis is None:
         raise HTTPException(status_code=404, detail="analysis not found")
-    if analysis.get("state") != "READY":
-        raise HTTPException(status_code=409, detail="cards are available only after repository map is ready")
-    cards = []
-    for card_id in analysis.get("card_ids", []):
-        card = _STORE.get_card(card_id)
-        if card is not None:
-            cards.append(card)
+    if analysis.get("status") != "READY":
+        raise HTTPException(status_code=409, detail="analysis is not ready")
+    cards = analysis.get("cards", [])
     return {"analysis_id": analysis_id, "cards": cards}
 
 
@@ -229,6 +229,8 @@ def get_card_teaching(card_id: str, level: str = Query(...)) -> dict[str, Any]:
         return verify_on_demand_card_explanation(card, proposed, level)
     except UnverifiedExplanation as exc:
         raise HTTPException(status_code=422, detail="teaching output failed evidence verification") from exc
+    except TeachingProviderError as exc:
+        raise HTTPException(status_code=502, detail="teaching provider failed") from exc
 
 
 @app.get("/v1/cards/{card_id}")
