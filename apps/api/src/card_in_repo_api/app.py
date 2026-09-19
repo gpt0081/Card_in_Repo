@@ -9,14 +9,15 @@ from pydantic import BaseModel
 from card_in_repo_analyzer import analyze_python, build_feature_map, split_python_symbol
 from .concepts import build_concept_candidates
 from .jobs import AnalysisJob, AnalysisJobQueue
-from .runtime import build_analysis_queue, build_analysis_store
+from .runtime import build_analysis_queue, build_analysis_store, build_teaching_provider
 from .store import AnalysisStore
 from .teaching import TeachingProvider, UnverifiedExplanation, build_card_basic_explanation, verify_on_demand_card_explanation
+from .teaching_provider import TeachingProviderError
 
 app = FastAPI(title="Card in Repo API", version="0.1.0")
 _STORE: AnalysisStore = build_analysis_store()
 _QUEUE: AnalysisJobQueue = build_analysis_queue()
-_TEACHING_PROVIDER: TeachingProvider | None = None
+_TEACHING_PROVIDER: TeachingProvider | None = build_teaching_provider()
 
 
 def set_store(store: AnalysisStore) -> None:
@@ -229,6 +230,8 @@ def get_card_teaching(card_id: str, level: str = Query(...)) -> dict[str, Any]:
         return verify_on_demand_card_explanation(card, proposed, level)
     except UnverifiedExplanation as exc:
         raise HTTPException(status_code=422, detail="teaching output failed evidence verification") from exc
+    except TeachingProviderError as exc:
+        raise HTTPException(status_code=502, detail="teaching provider failed") from exc
 
 
 @app.get("/v1/cards/{card_id}")

@@ -6,6 +6,8 @@ export type RepositoryFile = { path: string; symbols: FileSymbol[] };
 export type ConceptEvidence = { id:string; symbol_id:string; symbol_name:string; path?:string; range?: {start?: {line?: number}; end?: {line?: number}}; relation?:string; order:number };
 export type TeachingClaim = { text:string; evidence_ids:string[] };
 export type BasicExplanation = { level:'basic'; claims:TeachingClaim[]; verified:true };
+export type TeachingLevel = 'intermediate'|'advanced'|'deep';
+export type VerifiedTeaching = { level:TeachingLevel; claims:TeachingClaim[]; verified:true };
 export type ConceptCandidate = { id:string; name:string; kind:'execution_flow'; feature_id:string; evidence:ConceptEvidence[]; explanation:BasicExplanation };
 export type CardEvidence = {id:string;type:'SOURCE_RANGE';path:string;range:{start:{line:number};end:{line:number}}};
 export type LearningCard = { id:string; analysis_id:string; path:string; symbol_id:string; symbol_name:string; range:{start:{line:number};end:{line:number}}; segment:{index:number;count:number;previous_card_id?:string|null;next_card_id?:string|null}; source:string; basic_explanation:BasicExplanation; evidence:CardEvidence[] };
@@ -24,3 +26,4 @@ export function getFeatures(id: string) { return json<{analysis_id:string;featur
 export function getFiles(id: string) { return json<{analysis_id:string;files:RepositoryFile[]}>(`/v1/analyses/${id}/files`); }
 export function getConcepts(id: string) { return json<{analysis_id:string;concepts:ConceptCandidate[]}>(`/v1/analyses/${id}/concepts`); }
 export function getCards(id: string) { return json<{analysis_id:string;cards:LearningCard[]}>(`/v1/analyses/${id}/cards`); }
+export function getCardTeaching(cardId:string, level:TeachingLevel) { return json<VerifiedTeaching>(`/v1/cards/${encodeURIComponent(cardId)}/teaching?level=${level}`); }
