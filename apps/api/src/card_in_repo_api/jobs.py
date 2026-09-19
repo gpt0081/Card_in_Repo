@@ -132,15 +132,21 @@ class RedisAnalysisJobQueue:
         return ClaimedAnalysisJob(message_id, AnalysisJob.from_json(payload), self._attempts(message_id))
 
     def claim(self, timeout_seconds: int = 5) -> ClaimedAnalysisJob | None:
+        if timeout_seconds < 0:
+            raise ValueError("timeout_seconds must be non-negative")
         _next, stale, _deleted = self._redis.xautoclaim(
             self.KEY, self.GROUP, self._consumer, self._stale_ms, start_id="0-0", count=1
         )
         if stale:
             message_id, fields = stale[0]
             return self._delivery(message_id, fields)
+        read_options: dict[str, int] = {"count": 1}
+        # Redis XREADGROUP interprets BLOCK 0 as "block forever", not
+        # "do not block". Omit BLOCK entirely for an explicit zero timeout.
+        if timeout_seconds > 0:
+            read_options["block"] = timeout_seconds * 1000
         items = self._redis.xreadgroup(
-            self.GROUP, self._consumer, {self.KEY: ">"}, count=1,
-            block=max(0, timeout_seconds) * 1000,
+            self.GROUP, self._consumer, {self.KEY: ">"}, **read_options
         )
         if not items:
             return None
