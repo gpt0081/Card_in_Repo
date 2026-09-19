@@ -11,6 +11,7 @@ from .concepts import build_concept_candidates
 from .jobs import AnalysisJob, AnalysisJobQueue
 from .runtime import build_analysis_queue, build_analysis_store
 from .store import AnalysisStore
+from .teaching import build_card_basic_explanation
 
 app = FastAPI(title="Card in Repo API", version="0.1.0")
 _STORE: AnalysisStore = build_analysis_store()
@@ -64,7 +65,8 @@ def store_completed_analysis(repository: str, commit_sha: str, files: dict[str, 
                 evidence_id = f"evidence:{sha256((commit_sha + path + str(start) + str(end)).encode()).hexdigest()[:16]}"
                 card_id = f"card:{sha256((analysis_id + symbol['id'] + str(segment_index)).encode()).hexdigest()[:16]}"
                 card_range = {"start": {"line": start}, "end": {"line": end}}
-                card = {"id": card_id, "analysis_id": analysis_id, "repository": repository, "commit_sha": commit_sha, "path": path, "symbol_id": symbol["id"], "symbol_name": symbol["name"], "range": card_range, "parent_symbol_range": symbol["range"], "segment": {"index": segment_index, "count": len(segments), "previous_card_id": None, "next_card_id": None}, "source": excerpt, "basic_explanation": {"status": "STUB_VERIFIED", "summary": f"This card covers {symbol['name']} segment {segment_index + 1} of {len(segments)}.", "evidence_ids": [evidence_id]}, "evidence": [{"id": evidence_id, "type": "SOURCE_RANGE", "path": path, "range": card_range}]}
+                card = {"id": card_id, "analysis_id": analysis_id, "repository": repository, "commit_sha": commit_sha, "path": path, "symbol_id": symbol["id"], "symbol_name": symbol["name"], "range": card_range, "parent_symbol_range": symbol["range"], "segment": {"index": segment_index, "count": len(segments), "previous_card_id": None, "next_card_id": None}, "source": excerpt, "evidence": [{"id": evidence_id, "type": "SOURCE_RANGE", "path": path, "range": card_range}]}
+                card["basic_explanation"] = build_card_basic_explanation(card)
                 if symbol_cards:
                     previous = symbol_cards[-1]
                     card["segment"]["previous_card_id"] = previous["id"]

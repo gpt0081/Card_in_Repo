@@ -39,5 +39,9 @@ test('public Python repository reaches READY and follows feature, files, concept
   const card = page.locator('article.codeCard').first();
   await expect(card).toBeVisible();
   await expect(card.locator('pre code')).not.toBeEmpty();
-  await expect(card.locator('.cardTeaching[data-status="STUB_VERIFIED"]')).toBeVisible();
+  await expect(card.locator('.cardTeaching[data-verified="true"]')).toBeVisible();
+  await expect(card.locator('.teachingClaim').first()).toBeVisible();
+  await expect(card.locator('.evidenceCitation').first()).toHaveAttribute('data-evidence-id', /.+/);
+  await expect(page.locator('.cardTeaching[data-verified="false"]')).toHaveCount(0);
+  await expect(page.getByText('STUB_VERIFIED')).toHaveCount(0);
 });

@@ -19,7 +19,7 @@ def test_analysis_cards_are_gated_until_map_is_ready():
     assert response.status_code == 409
 
 
-def test_analysis_cards_preserve_learning_order_and_source_evidence():
+def test_analysis_cards_preserve_learning_order_and_verified_source_evidence():
     app_module = import_module("card_in_repo_api.app")
     store = MemoryAnalysisStore()
     app_module.set_store(store)
@@ -42,4 +42,9 @@ def test_analysis_cards_preserve_learning_order_and_source_evidence():
     assert first["path"] == "app.py"
     assert "def entry" in first["source"]
     assert first["evidence"][0]["range"] == first["range"]
-    assert first["basic_explanation"]["evidence_ids"] == [first["evidence"][0]["id"]]
+    explanation = first["basic_explanation"]
+    assert explanation["level"] == "basic"
+    assert explanation["verified"] is True
+    assert explanation["claims"]
+    assert explanation["claims"][0]["evidence_ids"] == [first["evidence"][0]["id"]]
+    assert "STUB_VERIFIED" not in str(first)
