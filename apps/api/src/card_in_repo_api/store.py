@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 from threading import Lock
 from typing import Any, Protocol
 
 
 class AnalysisStore(Protocol):
-    """Persistence boundary for immutable analysis snapshots and generated cards."""
+    """Persistence boundary for immutable analysis snapshots, generated cards, and learner state."""
 
     def put_analysis(self, analysis: dict[str, Any]) -> None: ...
     def get_analysis(self, analysis_id: str) -> dict[str, Any] | None: ...
@@ -15,6 +16,8 @@ class AnalysisStore(Protocol):
     def put_completed_analysis(self, analysis: dict[str, Any], cards: list[dict[str, Any]], *, expected_delivery_id: str | None = None) -> bool: ...
     def put_card(self, card: dict[str, Any]) -> None: ...
     def get_card(self, card_id: str) -> dict[str, Any] | None: ...
+    def put_learning_state(self, github_user_id: int, repository: str, concept_id: str, mastery: str, review_due_at: str | None = None) -> dict[str, Any]: ...
+    def get_learning_state(self, github_user_id: int, repository: str) -> list[dict[str, Any]]: ...
 
 
 class MemoryAnalysisStore:
@@ -23,6 +26,7 @@ class MemoryAnalysisStore:
     def __init__(self) -> None:
         self._analyses: dict[str, dict[str, Any]] = {}
         self._cards: dict[str, dict[str, Any]] = {}
+        self._learning: dict[tuple[int, str, str], dict[str, Any]] = {}
         self._lock = Lock()
 
     def put_analysis(self, analysis: dict[str, Any]) -> None:
@@ -43,7 +47,6 @@ class MemoryAnalysisStore:
             return True
 
     def claim_analysis_execution(self, analysis_id: str, delivery_id: str, retry_count: int) -> dict[str, Any] | None:
-        """Claim one analysis execution; only the same delivery may resume an active claim."""
         with self._lock:
             current = self._analyses.get(analysis_id)
             if current is None:
@@ -57,13 +60,10 @@ class MemoryAnalysisStore:
             return deepcopy(claimed)
 
     def put_completed_analysis(self, analysis: dict[str, Any], cards: list[dict[str, Any]], *, expected_delivery_id: str | None = None) -> bool:
-        """Publish cards and READY analysis only while the caller still owns execution."""
         with self._lock:
             current = self._analyses.get(analysis["id"])
             if expected_delivery_id is not None and (
-                current is None
-                or current.get("state") != "PARSING"
-                or current.get("execution_delivery_id") != expected_delivery_id
+                current is None or current.get("state") != "PARSING" or current.get("execution_delivery_id") != expected_delivery_id
             ):
                 return False
             for card in cards:
@@ -82,3 +82,23 @@ class MemoryAnalysisStore:
         with self._lock:
             value = self._cards.get(card_id)
             return deepcopy(value) if value is not None else None
+
+    def put_learning_state(self, github_user_id: int, repository: str, concept_id: str, mastery: str, review_due_at: str | None = None) -> dict[str, Any]:
+        if mastery not in {"unknown", "learning", "understood"}:
+            raise ValueError("invalid mastery")
+        value = {
+            "github_user_id": github_user_id,
+            "repository": repository,
+            "concept_id": concept_id,
+            "mastery": mastery,
+            "review_due_at": review_due_at,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with self._lock:
+            self._learning[(github_user_id, repository, concept_id)] = deepcopy(value)
+        return deepcopy(value)
+
+    def get_learning_state(self, github_user_id: int, repository: str) -> list[dict[str, Any]]:
+        with self._lock:
+            values = [deepcopy(value) for (user_id, repo, _), value in self._learning.items() if user_id == github_user_id and repo == repository]
+        return sorted(values, key=lambda value: value["concept_id"])
