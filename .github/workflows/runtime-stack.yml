@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CARD_IN_REPO_GITHUB_TOKEN: ${{ github.token }}
+      CARD_IN_REPO_TEACHING_PROVIDER: deterministic_test
+      CARD_IN_REPO_ALLOW_TEST_PROVIDER: "1"
     steps:
       - uses: actions/checkout@v4
       - name: Validate Compose model
@@ -30,7 +32,7 @@ jobs:
         run: |
           npm install
           npx playwright install --with-deps chromium
-      - name: Drive public repository to rendered feature map
+      - name: Drive public repository through verified on-demand teaching
         working-directory: apps/web
         env:
           E2E_BASE_URL: http://127.0.0.1:8080
