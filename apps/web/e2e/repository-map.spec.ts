@@ -25,6 +25,11 @@ test('public Python repository reaches READY and follows feature, files, concept
 
   await page.getByRole('button', { name: 'Concepts' }).click();
   await expect(page.getByRole('heading', { name: 'Concepts' })).toBeVisible();
-  await expect(page.locator('article.concept').first()).toBeVisible();
+  const concept = page.locator('article.concept').first();
+  await expect(concept).toBeVisible();
+  await expect(concept.locator('.basicTeaching[data-verified="true"]')).toBeVisible();
+  await expect(concept.locator('.teachingClaim').first()).toBeVisible();
+  await expect(concept.locator('.evidenceCitation').first()).toHaveAttribute('data-evidence-id', /.+/);
+  await expect(page.locator('.basicTeaching[data-verified="false"]')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Cards' })).toBeDisabled();
 });
