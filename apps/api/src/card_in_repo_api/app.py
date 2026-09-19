@@ -4,18 +4,19 @@ from hashlib import sha256
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from card_in_repo_analyzer import analyze_python, build_feature_map, split_python_symbol
 from .concepts import build_concept_candidates
 from .jobs import AnalysisJob, AnalysisJobQueue
 from .runtime import build_analysis_queue, build_analysis_store
 from .store import AnalysisStore
-from .teaching import build_card_basic_explanation
+from .teaching import TeachingProvider, UnverifiedExplanation, build_card_basic_explanation, verify_on_demand_card_explanation
 
 app = FastAPI(title="Card in Repo API", version="0.1.0")
 _STORE: AnalysisStore = build_analysis_store()
 _QUEUE: AnalysisJobQueue = build_analysis_queue()
+_TEACHING_PROVIDER: TeachingProvider | None = None
 
 
 def set_store(store: AnalysisStore) -> None:
@@ -26,6 +27,11 @@ def set_store(store: AnalysisStore) -> None:
 def set_queue(queue: AnalysisJobQueue) -> None:
     global _QUEUE
     _QUEUE = queue
+
+
+def set_teaching_provider(provider: TeachingProvider | None) -> None:
+    global _TEACHING_PROVIDER
+    _TEACHING_PROVIDER = provider
 
 
 class FixtureAnalysisRequest(BaseModel):
@@ -207,6 +213,22 @@ def get_analysis_cards(analysis_id: str) -> dict[str, Any]:
         if card is not None:
             cards.append(card)
     return {"analysis_id": analysis_id, "cards": cards}
+
+
+@app.get("/v1/cards/{card_id}/teaching")
+def get_card_teaching(card_id: str, level: str = Query(...)) -> dict[str, Any]:
+    if level not in {"intermediate", "advanced", "deep"}:
+        raise HTTPException(status_code=422, detail="level must be intermediate, advanced, or deep")
+    card = _STORE.get_card(card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="card not found")
+    if _TEACHING_PROVIDER is None:
+        raise HTTPException(status_code=503, detail="on-demand teaching provider is not configured")
+    try:
+        proposed = _TEACHING_PROVIDER.explain_card(card, level)
+        return verify_on_demand_card_explanation(card, proposed, level)
+    except UnverifiedExplanation as exc:
+        raise HTTPException(status_code=422, detail="teaching output failed evidence verification") from exc
 
 
 @app.get("/v1/cards/{card_id}")
