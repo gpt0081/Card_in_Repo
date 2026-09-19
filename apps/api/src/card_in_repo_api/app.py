@@ -223,11 +223,21 @@ def get_card_teaching(card_id: str, level: str = Query(...)) -> dict[str, Any]:
     card = _STORE.get_card(card_id)
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
+    cached = (card.get("on_demand_teaching") or {}).get(level)
+    if cached is not None:
+        try:
+            return verify_on_demand_card_explanation(card, cached, level)
+        except UnverifiedExplanation:
+            # Never publish stale/corrupt cached prose. Regenerate only through the normal verified path.
+            pass
     if _TEACHING_PROVIDER is None:
         raise HTTPException(status_code=503, detail="on-demand teaching provider is not configured")
     try:
         proposed = _TEACHING_PROVIDER.explain_card(card, level)
-        return verify_on_demand_card_explanation(card, proposed, level)
+        verified = verify_on_demand_card_explanation(card, proposed, level)
+        card["on_demand_teaching"] = {**(card.get("on_demand_teaching") or {}), level: verified}
+        _STORE.put_card(card)
+        return verified
     except UnverifiedExplanation as exc:
         raise HTTPException(status_code=422, detail="teaching output failed evidence verification") from exc
     except TeachingProviderError as exc:
