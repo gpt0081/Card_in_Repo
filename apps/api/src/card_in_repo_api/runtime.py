@@ -8,7 +8,7 @@ from .jobs import AnalysisJobQueue, MemoryAnalysisJobQueue, RedisAnalysisJobQueu
 from .postgres_store import PostgresAnalysisStore
 from .store import AnalysisStore, MemoryAnalysisStore
 from .teaching import TeachingProvider
-from .teaching_provider import JsonHttpTeachingProvider
+from .teaching_provider import DeterministicTestTeachingProvider, JsonHttpTeachingProvider
 
 
 class RuntimeConfigurationError(RuntimeError):
@@ -65,9 +65,14 @@ def build_teaching_provider(env: dict[str, str] | None = None) -> TeachingProvid
     backend = values.get("CARD_IN_REPO_TEACHING_PROVIDER", "none").strip().lower()
     if backend in {"", "none"}:
         return None
+    if backend == "deterministic_test":
+        if values.get("CARD_IN_REPO_ALLOW_TEST_PROVIDER", "").strip() != "1":
+            raise RuntimeConfigurationError("deterministic_test teaching provider requires CARD_IN_REPO_ALLOW_TEST_PROVIDER=1")
+        return DeterministicTestTeachingProvider()
     if backend != "json_http":
         raise RuntimeConfigurationError(
-            f"unsupported CARD_IN_REPO_TEACHING_PROVIDER={backend!r}; expected 'none' or 'json_http'"
+            "unsupported CARD_IN_REPO_TEACHING_PROVIDER="
+            f"{backend!r}; expected 'none', 'json_http', or guarded 'deterministic_test'"
         )
     endpoint = values.get("TEACHING_LLM_ENDPOINT", "").strip()
     model = values.get("TEACHING_LLM_MODEL", "").strip()
