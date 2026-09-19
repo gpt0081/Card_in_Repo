@@ -54,11 +54,22 @@ def health() -> dict[str, str]:
 
 
 def store_completed_analysis(repository: str, commit_sha: str, files: dict[str, str], facts: dict[str, Any], analysis_id: str | None = None, expected_delivery_id: str | None = None) -> dict[str, Any]:
+    # Persist the path relation as part of the fact layer. Single-file analyzers from
+    # early slices did not emit symbol_paths, but downstream Files/Concepts views must
+    # never depend on an ephemeral fallback used only while cards are being built.
+    facts = dict(facts)
+    symbols_list = facts.get("symbols", [])
+    symbol_paths = dict(facts.get("symbol_paths") or {})
+    if len(files) == 1:
+        only_path = next(iter(files))
+        for symbol in symbols_list:
+            symbol_paths.setdefault(symbol["id"], only_path)
+    facts["symbol_paths"] = symbol_paths
+
     features = build_feature_map(facts)
     analysis_id = analysis_id or str(uuid4())
     cards: list[dict[str, Any]] = []
-    symbols = {symbol["id"]: symbol for symbol in facts["symbols"]}
-    symbol_paths = facts.get("symbol_paths", {symbol_id: next(iter(files)) for symbol_id in symbols})
+    symbols = {symbol["id"]: symbol for symbol in symbols_list}
     for feature in features:
         for step in feature["flow_steps"]:
             symbol = symbols[step["symbol_id"]]
