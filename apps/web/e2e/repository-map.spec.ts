@@ -44,4 +44,12 @@ test('public Python repository reaches READY and follows feature, files, concept
   await expect(card.locator('.evidenceCitation').first()).toHaveAttribute('data-evidence-id', /.+/);
   await expect(page.locator('.cardTeaching[data-verified="false"]')).toHaveCount(0);
   await expect(page.getByText('STUB_VERIFIED')).toHaveCount(0);
+
+  await expect(card.getByRole('button', { name: 'Explain intermediate' })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Explain advanced' })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Explain deep' })).toBeVisible();
+  await card.getByRole('button', { name: 'Explain intermediate' }).click();
+  await expect(card.getByText('intermediate teaching unavailable. Verified Basic remains unchanged.')).toBeVisible();
+  await expect(card.locator('.deeperTeaching')).toHaveCount(0);
+  await expect(page.locator('.deeperTeaching[data-verified="false"]')).toHaveCount(0);
 });
