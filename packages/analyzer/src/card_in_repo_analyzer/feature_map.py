@@ -14,7 +14,7 @@ def build_feature_map(facts: dict[str, Any]) -> list[dict[str, Any]]:
     functions = {
         symbol["id"]: symbol
         for symbol in facts["symbols"]
-        if symbol["kind"] == "function" and symbol["parent_symbol_id"] is None
+        if symbol["kind"] == "function" and symbol.get("parent_symbol_id") is None
     }
     edges: dict[str, list[str]] = defaultdict(list)
     incoming: dict[str, int] = {symbol_id: 0 for symbol_id in functions}
