@@ -11,6 +11,24 @@ class TeachingProviderError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class DeterministicTestTeachingProvider:
+    """CI-only provider that proves the verified success path without an external LLM."""
+
+    def explain_card(self, card: dict[str, Any], level: str) -> dict[str, Any]:
+        evidence_ids = sorted(item["id"] for item in card.get("evidence", []) if item.get("id"))
+        if not evidence_ids:
+            raise TeachingProviderError("deterministic test provider requires card evidence")
+        symbol = card.get("symbol_name") or "this symbol"
+        return {
+            "level": level,
+            "claims": [{
+                "text": f"At {level} depth, study {symbol} against its cited static source evidence.",
+                "evidence_ids": evidence_ids,
+            }],
+        }
+
+
+@dataclass(frozen=True)
 class JsonHttpTeachingProvider:
     """OpenAI-compatible JSON chat adapter limited to teaching prose."""
 
