@@ -7,6 +7,8 @@ import psycopg
 from .jobs import AnalysisJobQueue, MemoryAnalysisJobQueue, RedisAnalysisJobQueue
 from .postgres_store import PostgresAnalysisStore
 from .store import AnalysisStore, MemoryAnalysisStore
+from .teaching import TeachingProvider
+from .teaching_provider import JsonHttpTeachingProvider
 
 
 class RuntimeConfigurationError(RuntimeError):
@@ -55,3 +57,26 @@ def build_analysis_queue(env: dict[str, str] | None = None) -> AnalysisJobQueue:
             raise RuntimeConfigurationError("REDIS_URL is required when CARD_IN_REPO_QUEUE=redis")
         return RedisAnalysisJobQueue(redis_url)
     raise RuntimeConfigurationError(f"unsupported CARD_IN_REPO_QUEUE={backend!r}; expected 'memory' or 'redis'")
+
+
+def build_teaching_provider(env: dict[str, str] | None = None) -> TeachingProvider | None:
+    """Build optional prose generation without granting it fact-layer authority."""
+    values = os.environ if env is None else env
+    backend = values.get("CARD_IN_REPO_TEACHING_PROVIDER", "none").strip().lower()
+    if backend in {"", "none"}:
+        return None
+    if backend != "json_http":
+        raise RuntimeConfigurationError(
+            f"unsupported CARD_IN_REPO_TEACHING_PROVIDER={backend!r}; expected 'none' or 'json_http'"
+        )
+    endpoint = values.get("TEACHING_LLM_ENDPOINT", "").strip()
+    model = values.get("TEACHING_LLM_MODEL", "").strip()
+    api_key = values.get("TEACHING_LLM_API_KEY", "").strip()
+    missing = [name for name, value in (
+        ("TEACHING_LLM_ENDPOINT", endpoint),
+        ("TEACHING_LLM_MODEL", model),
+        ("TEACHING_LLM_API_KEY", api_key),
+    ) if not value]
+    if missing:
+        raise RuntimeConfigurationError("json_http teaching provider requires " + ", ".join(missing))
+    return JsonHttpTeachingProvider(endpoint=endpoint, model=model, api_key=api_key)
