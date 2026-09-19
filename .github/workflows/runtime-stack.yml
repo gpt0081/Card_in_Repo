@@ -1,0 +1,45 @@
+name: runtime-stack
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  compose-runtime:
+    runs-on: ubuntu-latest
+    env:
+      CARD_IN_REPO_GITHUB_TOKEN: ${{ github.token }}
+      CARD_IN_REPO_TEACHING_PROVIDER: deterministic_test
+      CARD_IN_REPO_ALLOW_TEST_PROVIDER: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose model
+        run: docker compose -f compose.yml config --quiet
+      - name: Build application images
+        run: docker compose -f compose.yml build api worker web
+      - name: Start persistent product path
+        run: docker compose -f compose.yml up -d --wait postgres redis api worker web
+      - name: Verify API, worker, PWA, and browser-facing proxy
+        run: |
+          curl --fail --retry 5 --retry-delay 2 http://localhost:8000/health
+          curl --fail --retry 5 --retry-delay 2 http://localhost:8080/ | grep -q 'Card in Repo'
+          curl --fail --retry 5 --retry-delay 2 http://localhost:8080/api-health
+          test "$(docker compose -f compose.yml ps --status running --services worker)" = "worker"
+          test "$(docker compose -f compose.yml ps --status running --services web)" = "web"
+      - name: Install browser E2E dependencies
+        working-directory: apps/web
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+      - name: Drive public repository through verified on-demand teaching
+        working-directory: apps/web
+        env:
+          E2E_BASE_URL: http://127.0.0.1:8080
+        run: npm run test:e2e
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose -f compose.yml logs --no-color api worker web postgres redis
+      - name: Stop runtime
+        if: always()
+        run: docker compose -f compose.yml down -v
