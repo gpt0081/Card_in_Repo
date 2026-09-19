@@ -13,4 +13,4 @@ RUN python -m pip install --no-cache-dir /app/packages/analyzer /app/apps/api
 
 EXPOSE 8000
 
-CMD ["python", "-m", "uvicorn", "card_in_repo_api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "card_in_repo_api.asgi:app", "--host", "0.0.0.0", "--port", "8000"]
