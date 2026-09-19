@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('public Python repository reaches READY and follows feature, files, concepts ordering', async ({ page }) => {
+test('public Python repository reaches READY and follows feature, files, concepts, cards ordering', async ({ page }) => {
   test.setTimeout(120_000);
   await page.goto(process.env.E2E_BASE_URL ?? 'http://127.0.0.1:8080');
 
@@ -22,6 +22,7 @@ test('public Python repository reaches READY and follows feature, files, concept
   await expect(page.getByRole('heading', { name: 'File structure' })).toBeVisible();
   await expect(page.locator('article.file').first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Concepts' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Cards' })).toBeDisabled();
 
   await page.getByRole('button', { name: 'Concepts' }).click();
   await expect(page.getByRole('heading', { name: 'Concepts' })).toBeVisible();
@@ -31,5 +32,12 @@ test('public Python repository reaches READY and follows feature, files, concept
   await expect(concept.locator('.teachingClaim').first()).toBeVisible();
   await expect(concept.locator('.evidenceCitation').first()).toHaveAttribute('data-evidence-id', /.+/);
   await expect(page.locator('.basicTeaching[data-verified="false"]')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Cards' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Cards' })).toBeEnabled();
+
+  await page.getByRole('button', { name: 'Cards' }).click();
+  await expect(page.getByRole('heading', { name: 'Code cards' })).toBeVisible();
+  const card = page.locator('article.codeCard').first();
+  await expect(card).toBeVisible();
+  await expect(card.locator('pre code')).not.toBeEmpty();
+  await expect(card.locator('.cardTeaching[data-status="STUB_VERIFIED"]')).toBeVisible();
 });
