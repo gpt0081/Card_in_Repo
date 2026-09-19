@@ -1,0 +1,82 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: card_in_repo
+      POSTGRES_PASSWORD: card_in_repo
+      POSTGRES_DB: card_in_repo
+    ports: ["5432:5432"]
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U card_in_repo -d card_in_repo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["6379:6379"]
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  object-storage:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: card_in_repo
+      MINIO_ROOT_PASSWORD: card_in_repo_dev_only
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [object-data:/data]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      CARD_IN_REPO_STORE: postgres
+      DATABASE_URL: postgresql://card_in_repo:card_in_repo@postgres:5432/card_in_repo
+      CARD_IN_REPO_QUEUE: redis
+      REDIS_URL: redis://redis:6379/0
+      CARD_IN_REPO_TEACHING_PROVIDER: ${CARD_IN_REPO_TEACHING_PROVIDER:-none}
+      CARD_IN_REPO_ALLOW_TEST_PROVIDER: ${CARD_IN_REPO_ALLOW_TEST_PROVIDER:-0}
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["python", "-m", "card_in_repo_api.worker"]
+    environment:
+      CARD_IN_REPO_STORE: postgres
+      DATABASE_URL: postgresql://card_in_repo:card_in_repo@postgres:5432/card_in_repo
+      CARD_IN_REPO_QUEUE: redis
+      REDIS_URL: redis://redis:6379/0
+      CARD_IN_REPO_GITHUB_TOKEN: ${CARD_IN_REPO_GITHUB_TOKEN:-}
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports: ["8080:80"]
+    depends_on:
+      api: {condition: service_healthy}
+volumes:
+  postgres-data:
+  redis-data:
+  object-data:

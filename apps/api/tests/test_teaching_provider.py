@@ -1,0 +1,90 @@
+import json
+
+import pytest
+
+from card_in_repo_api.runtime import RuntimeConfigurationError, build_teaching_provider
+from card_in_repo_api.teaching import verify_on_demand_card_explanation, UnverifiedExplanation
+from card_in_repo_api.teaching_provider import JsonHttpTeachingProvider, TeachingProviderError
+
+
+class Response:
+    def __init__(self, body):
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self):
+        return json.dumps(self.body).encode()
+
+
+def card():
+    return {
+        "id": "card:1",
+        "symbol_name": "entry",
+        "path": "app.py",
+        "range": {"start": {"line": 1}, "end": {"line": 2}},
+        "source": "def entry():\n    return 1",
+        "segment": {"index": 0, "count": 1},
+        "evidence": [{"id": "evidence:1", "type": "SOURCE_RANGE", "path": "app.py"}],
+    }
+
+
+def test_json_http_provider_sends_only_card_facts_and_returns_structured_prose():
+    captured = {}
+
+    def opener(request, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return Response({"choices": [{"message": {"content": json.dumps({
+            "level": "intermediate",
+            "claims": [{"text": "Entry returns a literal.", "evidence_ids": ["evidence:1"]}],
+        })}}]})
+
+    provider = JsonHttpTeachingProvider("https://llm.invalid/chat", "teaching-model", "secret", opener=opener)
+    result = provider.explain_card(card(), "intermediate")
+    verified = verify_on_demand_card_explanation(card(), result, "intermediate")
+
+    assert verified["verified"] is True
+    payload = json.loads(captured["request"].data)
+    prompt = json.loads(payload["messages"][1]["content"])
+    assert prompt["requested_level"] == "intermediate"
+    assert prompt["card_facts"]["evidence"][0]["id"] == "evidence:1"
+    assert "repository" not in prompt["card_facts"]
+
+
+def test_provider_output_still_fails_closed_on_invented_evidence():
+    def opener(request, timeout):
+        return Response({"choices": [{"message": {"content": json.dumps({
+            "level": "deep",
+            "claims": [{"text": "Invented claim.", "evidence_ids": ["evidence:fake"]}],
+        })}}]})
+
+    result = JsonHttpTeachingProvider("https://llm.invalid/chat", "model", "secret", opener=opener).explain_card(card(), "deep")
+    with pytest.raises(UnverifiedExplanation):
+        verify_on_demand_card_explanation(card(), result, "deep")
+
+
+def test_malformed_provider_response_is_explicit_failure():
+    provider = JsonHttpTeachingProvider(
+        "https://llm.invalid/chat", "model", "secret", opener=lambda request, timeout: Response({"choices": []})
+    )
+    with pytest.raises(TeachingProviderError):
+        provider.explain_card(card(), "advanced")
+
+
+def test_runtime_requires_complete_configuration_and_defaults_off():
+    assert build_teaching_provider({}) is None
+    with pytest.raises(RuntimeConfigurationError):
+        build_teaching_provider({"CARD_IN_REPO_TEACHING_PROVIDER": "json_http"})
+
+    provider = build_teaching_provider({
+        "CARD_IN_REPO_TEACHING_PROVIDER": "json_http",
+        "TEACHING_LLM_ENDPOINT": "https://llm.invalid/chat",
+        "TEACHING_LLM_MODEL": "model",
+        "TEACHING_LLM_API_KEY": "secret",
+    })
+    assert isinstance(provider, JsonHttpTeachingProvider)
