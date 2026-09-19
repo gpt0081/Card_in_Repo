@@ -49,7 +49,9 @@ test('public Python repository reaches READY and follows feature, files, concept
   await expect(card.getByRole('button', { name: 'Explain advanced' })).toBeVisible();
   await expect(card.getByRole('button', { name: 'Explain deep' })).toBeVisible();
   await card.getByRole('button', { name: 'Explain intermediate' }).click();
-  await expect(card.getByText('intermediate teaching unavailable. Verified Basic remains unchanged.')).toBeVisible();
-  await expect(card.locator('.deeperTeaching')).toHaveCount(0);
+  const intermediate = card.locator('.deeperTeaching[data-verified="true"][data-level="intermediate"]');
+  await expect(intermediate).toBeVisible();
+  await expect(intermediate.locator('.teachingClaim').first()).toContainText('intermediate');
+  await expect(intermediate.locator('.evidenceCitation').first()).toHaveAttribute('data-evidence-id', /.+/);
   await expect(page.locator('.deeperTeaching[data-verified="false"]')).toHaveCount(0);
 });
