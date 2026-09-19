@@ -159,10 +159,28 @@ class PostgresAnalysisStore:
             return True
 
     def put_card(self, card: dict[str, Any]) -> None:
+        """Upsert a card while merging independently generated teaching levels.
+
+        A request may have read the card before another request persisted a different
+        on-demand level. Merge the nested cache in PostgreSQL so the stale snapshot
+        cannot erase teaching that committed first.
+        """
         with psycopg.connect(self.database_url) as connection:
             connection.execute("""
                 INSERT INTO cards (id, analysis_id, payload) VALUES (%s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET analysis_id = EXCLUDED.analysis_id, payload = EXCLUDED.payload
+                ON CONFLICT (id) DO UPDATE SET
+                    analysis_id = EXCLUDED.analysis_id,
+                    payload = CASE
+                        WHEN EXCLUDED.payload ? 'on_demand_teaching' THEN
+                            jsonb_set(
+                                EXCLUDED.payload,
+                                '{on_demand_teaching}',
+                                COALESCE(cards.payload->'on_demand_teaching', '{}'::jsonb)
+                                || COALESCE(EXCLUDED.payload->'on_demand_teaching', '{}'::jsonb),
+                                true
+                            )
+                        ELSE EXCLUDED.payload
+                    END
             """, (card["id"], card["analysis_id"], Jsonb(card)))
 
     def get_card(self, card_id: str) -> dict[str, Any] | None:
