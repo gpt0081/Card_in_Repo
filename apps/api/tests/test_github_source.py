@@ -37,20 +37,26 @@ def test_resolve_github_file_pins_content_request_to_commit_sha(monkeypatch):
     assert calls[-1].endswith(f"/contents/src/app.py?ref={sha}")
 
 
-def test_repository_snapshot_uses_commit_tree_and_sorted_python_blobs(monkeypatch):
+def test_repository_snapshot_uses_commit_tree_and_sorted_supported_blobs(monkeypatch):
     sha = "b" * 40
     def encoded(text: str) -> dict: return {"encoding": "base64", "content": base64.b64encode(text.encode()).decode()}
     def fake_get_json(url: str) -> dict:
         if url.endswith("/repos/octo/demo"): return {"private": False, "default_branch": "main"}
         if "/commits/main" in url: return {"sha": sha}
-        if f"/git/trees/{sha}?recursive=1" in url: return {"truncated": False, "tree": [{"type": "blob", "path": "z.py", "sha": "z", "size": 8}, {"type": "blob", "path": "README.md", "sha": "r", "size": 5}, {"type": "blob", "path": "a.py", "sha": "a", "size": 8}]}
+        if f"/git/trees/{sha}?recursive=1" in url: return {"truncated": False, "tree": [
+            {"type": "blob", "path": "z.tsx", "sha": "z", "size": 8},
+            {"type": "blob", "path": "README.md", "sha": "r", "size": 5},
+            {"type": "blob", "path": "web/main.js", "sha": "j", "size": 8},
+            {"type": "blob", "path": "a.py", "sha": "a", "size": 8},
+        ]}
         if url.endswith("/git/blobs/a"): return encoded("def a(): pass\n")
-        if url.endswith("/git/blobs/z"): return encoded("def z(): pass\n")
+        if url.endswith("/git/blobs/j"): return encoded("function boot() {}\n")
+        if url.endswith("/git/blobs/z"): return encoded("export const App = () => null;\n")
         raise AssertionError(url)
     monkeypatch.setattr(github_source, "_get_json", fake_get_json)
     snapshot = resolve_github_repository("https://github.com/octo/demo")
     assert snapshot.commit_sha == sha
-    assert list(snapshot.files) == ["a.py", "z.py"]
+    assert list(snapshot.files) == ["a.py", "web/main.js", "z.tsx"]
 
 
 def test_repository_snapshot_rejects_truncated_tree(monkeypatch):

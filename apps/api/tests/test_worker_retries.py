@@ -16,7 +16,7 @@ def test_retryable_failure_is_dead_lettered_after_bounded_attempts(monkeypatch):
     queue.enqueue(AnalysisJob(analysis_id, "https://github.com/octo/demo"))
     monkeypatch.setattr(worker, "_STORE", store)
     monkeypatch.setattr(worker, "resolve_github_repository", lambda *_args, **_kwargs: GitHubRepositorySnapshot(repository="octo/demo", commit_sha="a" * 40, files={"app.py": "def run():\n    return 1\n"}))
-    monkeypatch.setattr(worker, "analyze_python_repository", lambda _files: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(worker, "analyze_repository", lambda _files: (_ for _ in ()).throw(RuntimeError("boom")))
     monkeypatch.setenv("CARD_IN_REPO_MAX_ANALYSIS_ATTEMPTS", "3")
 
     with pytest.raises(RuntimeError):
