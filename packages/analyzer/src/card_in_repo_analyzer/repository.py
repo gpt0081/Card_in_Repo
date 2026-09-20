@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import PurePosixPath
+import posixpath
 import re
 from typing import Any
 
@@ -30,8 +31,9 @@ def _resolve_relative_ecmascript_module(importer: str, module: str, known_paths:
     """Resolve only unambiguous relative source modules, without emulating a bundler."""
     if not module.startswith("."):
         return None
-    base = PurePosixPath(importer).parent.joinpath(module)
-    normalized = str(PurePosixPath(*[part for part in base.parts if part != "."]))
+    normalized = posixpath.normpath(posixpath.join(posixpath.dirname(importer), module))
+    if normalized == ".." or normalized.startswith("../"):
+        return None
     candidates: list[str] = []
     if PurePosixPath(normalized).suffix in ECMASCRIPT_SUFFIXES:
         if normalized in known_paths:
