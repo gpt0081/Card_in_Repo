@@ -41,6 +41,31 @@ def test_cross_file_typescript_flow_preserves_repository_paths():
     assert entry["provenance"] == "deterministic-resolved-call-graph"
 
 
+def test_typescript_class_functions_are_visible_with_class_ownership():
+    facts = analyze_repository({
+        "src/service.ts": "class Service {\n  async execute() { return 'ok'; }\n  refresh = () => 'fresh';\n}\n",
+    })
+    features = build_feature_map(facts)
+
+    by_name = {feature["name"]: feature for feature in features}
+    assert {"execute", "refresh"} <= set(by_name)
+    for name in ("execute", "refresh"):
+        step = by_name[name]["flow_steps"][0]
+        assert step["path"] == "src/service.ts"
+        assert step["owner_symbol_name"] == "Service"
+        assert step["owner_symbol_id"]
+
+
+def test_nested_local_function_does_not_become_repository_feature():
+    facts = analyze_repository({
+        "src/main.ts": "function entry() { function helper() { return 1; } return helper(); }\n",
+    })
+    features = build_feature_map(facts)
+
+    assert "entry" in {feature["name"] for feature in features}
+    assert "helper" not in {feature["name"] for feature in features}
+
+
 def test_ambiguous_same_name_call_is_not_resolved():
     source = '''
 def duplicate():
