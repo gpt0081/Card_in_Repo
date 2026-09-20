@@ -52,9 +52,14 @@ test('public Python repository reaches READY and follows feature, files, concept
 });
 
 test('public TypeScript repository reaches READY and produces evidence-backed learning cards', async ({ page }) => {
-  // A real TS repository requires many GitHub blob requests; keep the acceptance proof
-  // strict while allowing network-bound ingestion more headroom than the tiny Python fixture.
-  test.setTimeout(240_000);
-  await proveLearningPath(page, 'https://github.com/microsoft/TypeScript-Node-Starter', 220_000);
-  await expect(page.locator('article.file').filter({ hasText: /\.tsx?|\.jsx?/ }).first()).toBeAttached();
+  // Keep this fixture intentionally small: the acceptance proof should exercise the real
+  // public GitHub network path without turning CI into a repository-size benchmark.
+  test.setTimeout(120_000);
+  await proveLearningPath(page, 'https://github.com/microsoft/TypeScript-Babel-Starter');
+
+  // proveLearningPath ends in Cards, so explicitly return to Files before asserting that
+  // the fetched public snapshot actually contains JavaScript/TypeScript-family source.
+  await page.getByRole('button', { name: 'Files' }).click();
+  await expect(page.getByRole('heading', { name: 'File structure' })).toBeVisible();
+  await expect(page.locator('article.file').filter({ hasText: /\.tsx?|\.jsx?/ }).first()).toBeVisible();
 });
