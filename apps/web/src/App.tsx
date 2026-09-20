@@ -1,20 +1,22 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { ConceptCandidate, Feature, LearningCard, RepositoryFile, TeachingLevel, VerifiedTeaching, getAnalysis, getCardTeaching, getCards, getConcepts, getFeatures, getFiles, submitRepository } from './api';
 import LearningProgress from './LearningProgress';
+import { LearningView, readLearningRoute, writeLearningRoute } from './learningRoute';
 import './app.css';
 
 const terminal = new Set(['READY','FAILED_TERMINAL','FAILED_EXHAUSTED']);
 const teachingLevels: TeachingLevel[] = ['intermediate','advanced','deep'];
-type View = 'features'|'files'|'concepts'|'cards';
+type View = LearningView;
 type TeachingByCard = Record<string, Partial<Record<TeachingLevel, VerifiedTeaching>>>;
 type TeachingFlags = Record<string, Partial<Record<TeachingLevel, boolean>>>;
 type TeachingErrors = Record<string, Partial<Record<TeachingLevel, string>>>;
 
 export default function App() {
+  const initialRoute = readLearningRoute(window.location.search);
   const [url,setUrl]=useState('https://github.com/octocat/Hello-World');
-  const [id,setId]=useState<string>(); const [state,setState]=useState('IDLE');
+  const [id,setId]=useState<string|undefined>(initialRoute.analysisId); const [state,setState]=useState(initialRoute.analysisId?'RESTORING':'IDLE');
   const [features,setFeatures]=useState<Feature[]>([]); const [files,setFiles]=useState<RepositoryFile[]>([]); const [concepts,setConcepts]=useState<ConceptCandidate[]>([]); const [cards,setCards]=useState<LearningCard[]>([]);
-  const [view,setView]=useState<View>('features'); const [error,setError]=useState<string>();
+  const [view,setView]=useState<View>(initialRoute.view); const [error,setError]=useState<string>();
   const [teaching,setTeaching]=useState<TeachingByCard>({}); const [teachingLoading,setTeachingLoading]=useState<TeachingFlags>({}); const [teachingErrors,setTeachingErrors]=useState<TeachingErrors>({});
   async function submit(e:FormEvent){e.preventDefault();setError(undefined);setFeatures([]);setFiles([]);setConcepts([]);setCards([]);setTeaching({});setTeachingLoading({});setTeachingErrors({});setView('features');try{const r=await submitRepository(url.trim());setId(r.id);setState(r.state)}catch(e){setError(e instanceof Error?e.message:String(e))}}
   async function loadFiles(){if(!id||state!=='READY')return null;if(files.length)return files;const result=await getFiles(id);setFiles(result.files);return result.files}
@@ -34,7 +36,9 @@ export default function App() {
     }catch(e){setTeachingErrors(current=>({...current,[card.id]:{...current[card.id],[level]:e instanceof Error?e.message:String(e)}}));}
     finally{setTeachingLoading(current=>({...current,[card.id]:{...current[card.id],[level]:false}}));}
   }
-  useEffect(()=>{if(!id||terminal.has(state))return;const timer=setInterval(async()=>{try{const a=await getAnalysis(id);setState(a.state);if(a.state==='READY'){const map=await getFeatures(id);setFeatures(map.features)}if(a.error)setError(a.error)}catch(e){setError(e instanceof Error?e.message:String(e))}},1000);return()=>clearInterval(timer)},[id,state]);
+  useEffect(()=>{if(!initialRoute.analysisId)return;let cancelled=false;(async()=>{try{const a=await getAnalysis(initialRoute.analysisId!);if(cancelled)return;setState(a.state);if(a.error)setError(a.error);if(a.state!=='READY')return;const map=await getFeatures(initialRoute.analysisId!);if(cancelled)return;setFeatures(map.features);if(initialRoute.view==='features')return;const fileResult=await getFiles(initialRoute.analysisId!);if(cancelled)return;setFiles(fileResult.files);if(initialRoute.view==='files')return;const conceptResult=await getConcepts(initialRoute.analysisId!);if(cancelled)return;setConcepts(conceptResult.concepts);if(initialRoute.view==='concepts')return;const cardResult=await getCards(initialRoute.analysisId!);if(cancelled)return;setCards(cardResult.cards)}catch(e){if(!cancelled){setError(e instanceof Error?e.message:String(e));setState('FAILED_TERMINAL')}}})();return()=>{cancelled=true}},[]);
+  useEffect(()=>{const next=writeLearningRoute(id,view);const current=`${window.location.pathname}${window.location.search}`;if(next!==current)window.history.replaceState(null,'',next)},[id,view]);
+  useEffect(()=>{if(!id||terminal.has(state)||state==='RESTORING')return;const timer=setInterval(async()=>{try{const a=await getAnalysis(id);setState(a.state);if(a.state==='READY'){const map=await getFeatures(id);setFeatures(map.features)}if(a.error)setError(a.error)}catch(e){setError(e instanceof Error?e.message:String(e))}},1000);return()=>clearInterval(timer)},[id,state]);
   return <main><header><span className="eyebrow">CARD IN REPO</span><h1>Read the flow before the files.</h1><p>Paste a public GitHub repository. The first result is its feature and execution map, not a wall of code cards.</p></header>
     <form onSubmit={submit}><label htmlFor="repo">Public repository</label><div className="submitRow"><input id="repo" type="url" required value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://github.com/owner/repo"/><button disabled={state!=='IDLE'&&!terminal.has(state)}>Map repo</button></div></form>
     {state!=='IDLE'&&<section className="status" aria-live="polite"><strong>{state}</strong><span>{id}</span></section>}{error&&<p className="error">{error}</p>}
