@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from card_in_repo_analyzer import analyze_python_repository
+from card_in_repo_analyzer import analyze_repository
 
 from .app import _STORE, store_completed_analysis
 from .github_source import GitHubSourceError, resolve_github_repository
@@ -45,7 +45,7 @@ def run_one(queue: AnalysisJobQueue | None = None, timeout_seconds: int = 5) -> 
     try:
         snapshot = resolve_github_repository(job.repository_url, job.ref)
         _STORE.put_analysis({**current, "state": "PARSING", "repository": snapshot.repository, "commit_sha": snapshot.commit_sha})
-        facts = analyze_python_repository(snapshot.files)
+        facts = analyze_repository(snapshot.files)
         store_completed_analysis(
             snapshot.repository,
             snapshot.commit_sha,
