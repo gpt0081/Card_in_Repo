@@ -6,7 +6,12 @@ build-backend = "hatchling.build"
 name = "card-in-repo-analyzer"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["tree-sitter>=0.25,<0.26", "tree-sitter-python>=0.25,<0.26"]
+dependencies = [
+  "tree-sitter>=0.25,<0.26",
+  "tree-sitter-python>=0.25,<0.26",
+  "tree-sitter-javascript==0.25.0",
+  "tree-sitter-typescript==0.23.2",
+]
 
 [project.optional-dependencies]
 test = ["pytest>=8,<9"]
