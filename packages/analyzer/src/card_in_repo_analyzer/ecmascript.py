@@ -8,7 +8,7 @@ from tree_sitter import Language, Parser
 import tree_sitter_javascript
 import tree_sitter_typescript
 
-ANALYZER_VERSION = "ecmascript-tree-sitter-v0.1.0"
+ANALYZER_VERSION = "ecmascript-tree-sitter-v0.2.0"
 
 
 def _point(node: Any, which: str) -> dict[str, int]:
@@ -44,7 +44,16 @@ def _analyze(path: str, source_text: str, language_name: str, grammar: Any) -> d
             if name_node is not None:
                 kind = "class" if node.type == "class_declaration" else "function"
                 current = add_symbol(node, _text(source, name_node), kind, parent_symbol, _text(source, node).lstrip().startswith("async "))
+        elif node.type == "method_definition":
+            name_node = node.child_by_field_name("name")
+            if name_node is not None:
+                current = add_symbol(node, _text(source, name_node), "function", parent_symbol, _text(source, node).lstrip().startswith("async "))
         elif node.type == "variable_declarator":
+            name_node = node.child_by_field_name("name")
+            value_node = node.child_by_field_name("value")
+            if name_node is not None and value_node is not None and value_node.type in {"arrow_function", "function_expression", "generator_function"}:
+                current = add_symbol(node, _text(source, name_node), "function", parent_symbol, _text(source, value_node).lstrip().startswith("async "))
+        elif node.type in {"field_definition", "public_field_definition"}:
             name_node = node.child_by_field_name("name")
             value_node = node.child_by_field_name("value")
             if name_node is not None and value_node is not None and value_node.type in {"arrow_function", "function_expression", "generator_function"}:
