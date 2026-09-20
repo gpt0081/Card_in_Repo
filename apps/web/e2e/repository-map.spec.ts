@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-async function proveLearningPath(page: any, repositoryUrl: string) {
+async function proveLearningPath(page: any, repositoryUrl: string, readyTimeout = 110_000) {
   await page.goto(process.env.E2E_BASE_URL ?? 'http://127.0.0.1:8080');
   await expect(page.getByRole('heading', { name: 'Read the flow before the files.' })).toBeVisible();
   await page.getByLabel('Public repository').fill(repositoryUrl);
@@ -8,7 +8,7 @@ async function proveLearningPath(page: any, repositoryUrl: string) {
 
   const status = page.locator('.status strong');
   await expect(status).not.toHaveText('IDLE');
-  await expect(status).toHaveText('READY', { timeout: 110_000 });
+  await expect(status).toHaveText('READY', { timeout: readyTimeout });
 
   await expect(page.getByRole('heading', { name: 'Repository map' })).toBeVisible();
   await expect(page.locator('article.feature').first()).toBeVisible();
@@ -52,7 +52,9 @@ test('public Python repository reaches READY and follows feature, files, concept
 });
 
 test('public TypeScript repository reaches READY and produces evidence-backed learning cards', async ({ page }) => {
-  test.setTimeout(120_000);
-  await proveLearningPath(page, 'https://github.com/microsoft/TypeScript-Node-Starter');
+  // A real TS repository requires many GitHub blob requests; keep the acceptance proof
+  // strict while allowing network-bound ingestion more headroom than the tiny Python fixture.
+  test.setTimeout(240_000);
+  await proveLearningPath(page, 'https://github.com/microsoft/TypeScript-Node-Starter', 220_000);
   await expect(page.locator('article.file').filter({ hasText: /\.tsx?|\.jsx?/ }).first()).toBeAttached();
 });
