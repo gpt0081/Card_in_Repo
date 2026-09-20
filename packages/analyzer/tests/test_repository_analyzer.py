@@ -1,4 +1,4 @@
-from card_in_repo_analyzer import analyze_python_repository
+from card_in_repo_analyzer import analyze_python_repository, analyze_repository
 
 
 def test_repository_analysis_resolves_explicit_cross_file_import():
@@ -30,3 +30,25 @@ def test_repository_analysis_is_deterministic_by_path():
         "README.md": "ignored",
     })
     assert [file["path"] for file in facts["files"]] == ["a.py", "z.py"]
+
+
+def test_repository_analysis_combines_python_javascript_typescript_and_tsx():
+    facts = analyze_repository({
+        "backend/app.py": "def serve():\n    return 1\n",
+        "web/app.js": "export function boot() { return render(); }\nfunction render() { return 1; }\n",
+        "web/model.ts": "export const load = async () => fetch('/api');\n",
+        "web/view.tsx": "export const View = () => <main>Card</main>;\n",
+        "README.md": "ignored",
+    })
+
+    assert [(file["path"], file["language"]) for file in facts["files"]] == [
+        ("backend/app.py", "python"),
+        ("web/app.js", "javascript"),
+        ("web/model.ts", "typescript"),
+        ("web/view.tsx", "tsx"),
+    ]
+    assert {symbol["name"] for symbol in facts["symbols"]} >= {"serve", "boot", "render", "load", "View"}
+    assert set(facts["symbol_paths"].values()) == {"backend/app.py", "web/app.js", "web/model.ts", "web/view.tsx"}
+    render_call = next(call for call in facts["calls"] if call["callee"] == "render")
+    assert render_call["path"] == "web/app.js"
+    assert render_call["resolved_target_id"] is not None
