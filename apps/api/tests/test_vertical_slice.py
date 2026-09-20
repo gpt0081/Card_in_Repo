@@ -66,7 +66,7 @@ def test_fixture_analysis_rejects_unsupported_language():
     assert response.status_code == 422
 
 
-def test_public_github_analysis_is_queued_then_worker_reaches_ready(monkeypatch):
+def test_public_github_analysis_is_queued_then_worker_reaches_ready_for_mixed_languages(monkeypatch):
     app_module = import_module("card_in_repo_api.app")
     worker_module = import_module("card_in_repo_api.worker")
     store = MemoryAnalysisStore()
@@ -75,7 +75,12 @@ def test_public_github_analysis_is_queued_then_worker_reaches_ready(monkeypatch)
     app_module.set_queue(queue)
     monkeypatch.setattr(worker_module, "_STORE", store)
     sha = "c" * 40
-    files = {"app.py": "from services.user import load_user\n\ndef entry(name):\n    return load_user(name)\n", "services/user.py": "def load_user(name):\n    return name.strip()\n"}
+    files = {
+        "app.py": "from services.user import load_user\n\ndef entry(name):\n    return load_user(name)\n",
+        "services/user.py": "def load_user(name):\n    return name.strip()\n",
+        "web/main.js": "export function boot() { return render(); }\nfunction render() { return 'ready'; }\n",
+        "web/model.ts": "export const normalize = (value: string) => value.trim();\n",
+    }
     monkeypatch.setattr(worker_module, "resolve_github_repository", lambda repository_url, ref=None: GitHubRepositorySnapshot(repository="octo/demo", commit_sha=sha, files=files))
 
     response = client.post("/v1/analyses", json={"repository_url": "https://github.com/octo/demo"})
@@ -91,8 +96,9 @@ def test_public_github_analysis_is_queued_then_worker_reaches_ready(monkeypatch)
     assert analysis["source_repository_url"] == "https://github.com/octo/demo"
     entry = next(feature for feature in analysis["features"] if feature["name"] == "entry")
     assert [step["symbol_name"] for step in entry["flow_steps"]] == ["entry", "load_user"]
+    assert {feature["name"] for feature in analysis["features"]} >= {"entry", "boot", "normalize"}
     cards = [store.get_card(card_id) for card_id in analysis["card_ids"]]
-    assert {card["path"] for card in cards} == {"app.py", "services/user.py"}
+    assert {card["path"] for card in cards} == {"app.py", "services/user.py", "web/main.js", "web/model.ts"}
 
 
 def test_exhausted_analysis_can_be_requeued_once_without_changing_identity():
