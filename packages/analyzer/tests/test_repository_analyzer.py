@@ -52,3 +52,39 @@ def test_repository_analysis_combines_python_javascript_typescript_and_tsx():
     render_call = next(call for call in facts["calls"] if call["callee"] == "render")
     assert render_call["path"] == "web/app.js"
     assert render_call["resolved_target_id"] is not None
+
+
+def test_repository_analysis_resolves_relative_typescript_named_import_with_alias():
+    facts = analyze_repository({
+        "web/app.ts": "import { loadUser as load } from './services/user';\nexport function boot() { return load(); }\n",
+        "web/services/user.ts": "export function loadUser() { return 1; }\n",
+    })
+
+    call = next(call for call in facts["calls"] if call["callee"] == "load")
+    target = next(symbol for symbol in facts["symbols"] if symbol["id"] == call["resolved_target_id"])
+    assert target["name"] == "loadUser"
+    assert facts["symbol_paths"][target["id"]] == "web/services/user.ts"
+    assert call["resolution"] == "repository-import"
+
+
+def test_repository_analysis_resolves_parent_relative_javascript_index_import():
+    facts = analyze_repository({
+        "web/pages/home.js": "import { render } from '../ui';\nexport function home() { return render(); }\n",
+        "web/ui/index.js": "export function render() { return 'ok'; }\n",
+    })
+    call = next(call for call in facts["calls"] if call["callee"] == "render")
+    assert call["resolved_target_id"] is not None
+    assert facts["symbol_paths"][call["resolved_target_id"]] == "web/ui/index.js"
+
+
+def test_repository_analysis_does_not_guess_package_or_ambiguous_extension_imports():
+    facts = analyze_repository({
+        "web/app.ts": "import { load } from 'pkg';\nimport { render } from './view';\nexport function boot() { load(); return render(); }\n",
+        "web/view.ts": "export function render() { return 1; }\n",
+        "web/view.tsx": "export function render() { return <main />; }\n",
+        "web/pkg.ts": "export function load() { return 1; }\n",
+    })
+    load_call = next(call for call in facts["calls"] if call["callee"] == "load")
+    render_call = next(call for call in facts["calls"] if call["callee"] == "render")
+    assert load_call["resolved_target_id"] is None
+    assert render_call["resolved_target_id"] is None
