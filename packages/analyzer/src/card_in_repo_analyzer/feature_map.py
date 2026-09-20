@@ -5,17 +5,20 @@ from typing import Any
 
 
 def build_feature_map(facts: dict[str, Any]) -> list[dict[str, Any]]:
-    """Build conservative feature candidates from resolved in-file calls.
+    """Build conservative feature candidates from resolved calls.
 
     Roots are top-level functions that are not called by another resolved function.
     Each feature is the deterministic reachable call flow from one root. Cycles are
-    visited once. Unresolved calls never become graph edges.
+    visited once. Unresolved calls never become graph edges. When the fact layer
+    knows a symbol's repository path, expose it on the flow step so downstream
+    teaching surfaces can show cross-file execution without re-inferring ownership.
     """
     functions = {
         symbol["id"]: symbol
         for symbol in facts["symbols"]
         if symbol["kind"] == "function" and symbol.get("parent_symbol_id") is None
     }
+    symbol_paths = facts.get("symbol_paths") or {}
     edges: dict[str, list[str]] = defaultdict(list)
     incoming: dict[str, int] = {symbol_id: 0 for symbol_id in functions}
 
@@ -31,6 +34,19 @@ def build_feature_map(facts: dict[str, Any]) -> list[dict[str, Any]]:
     if not roots and functions:
         roots = [next(iter(functions))]
 
+    def flow_step(symbol_id: str, position: int) -> dict[str, Any]:
+        symbol = functions[symbol_id]
+        step = {
+            "position": position,
+            "symbol_id": symbol_id,
+            "symbol_name": symbol["name"],
+            "range": symbol["range"],
+        }
+        path = symbol_paths.get(symbol_id)
+        if path:
+            step["path"] = path
+        return step
+
     features: list[dict[str, Any]] = []
     globally_reached: set[str] = set()
     for root in roots:
@@ -42,13 +58,7 @@ def build_feature_map(facts: dict[str, Any]) -> list[dict[str, Any]]:
                 return
             seen.add(symbol_id)
             globally_reached.add(symbol_id)
-            symbol = functions[symbol_id]
-            steps.append({
-                "position": len(steps) + 1,
-                "symbol_id": symbol_id,
-                "symbol_name": symbol["name"],
-                "range": symbol["range"],
-            })
+            steps.append(flow_step(symbol_id, len(steps) + 1))
             for target in edges.get(symbol_id, []):
                 walk(target)
 
@@ -69,12 +79,7 @@ def build_feature_map(facts: dict[str, Any]) -> list[dict[str, Any]]:
                 "name": symbol["name"],
                 "confidence": 1.0,
                 "provenance": "deterministic-disconnected-symbol",
-                "flow_steps": [{
-                    "position": 1,
-                    "symbol_id": symbol_id,
-                    "symbol_name": symbol["name"],
-                    "range": symbol["range"],
-                }],
+                "flow_steps": [flow_step(symbol_id, 1)],
             })
 
     return features
