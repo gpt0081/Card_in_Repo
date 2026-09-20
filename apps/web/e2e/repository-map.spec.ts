@@ -52,10 +52,11 @@ test('public Python repository reaches READY and follows feature, files, concept
 });
 
 test('public TypeScript repository reaches READY and produces evidence-backed learning cards', async ({ page }) => {
-  // Keep this fixture intentionally small: the acceptance proof should exercise the real
-  // public GitHub network path without turning CI into a repository-size benchmark.
+  // Use a tiny, active public repository with ordinary named TypeScript functions. This
+  // exercises the real GitHub network path while also matching the function-sized-card
+  // contract that the current fact layer is expected to support.
   test.setTimeout(120_000);
-  await proveLearningPath(page, 'https://github.com/microsoft/TypeScript-Babel-Starter');
+  await proveLearningPath(page, 'https://github.com/TheInvader360/fc64js-typescript-basic-example');
 
   // proveLearningPath ends in Cards, so explicitly return to Files before asserting that
   // the fetched public snapshot actually contains JavaScript/TypeScript-family source.
