@@ -38,6 +38,8 @@ test('authenticated concept mastery persists across a real browser reload', asyn
 
   await page.getByRole('button', { name: 'Files' }).click();
   await page.getByRole('button', { name: 'Concepts' }).click();
+  await expect(page).toHaveURL(new RegExp(`analysis=${analysisId}.*view=concepts`));
+
   const progress = page.getByRole('region', { name: 'Concept learning progress' });
   await expect(progress).toBeVisible();
   const row = progress.locator('.learningRow').first();
@@ -50,9 +52,15 @@ test('authenticated concept mastery persists across a real browser reload', asyn
 
   await page.reload();
   await expect(page.getByLabel('GitHub account').getByText('@ci-learner')).toBeVisible();
+  await expect(page.locator('.status strong')).toHaveText('READY', { timeout: 110_000 });
+  await expect(page).toHaveURL(new RegExp(`analysis=${analysisId}.*view=concepts`));
 
-  // Reload currently resets the transient map UI, so verify persistence through the
-  // same browser session and signed HttpOnly cookie against the real API/store.
+  const restoredProgress = page.getByRole('region', { name: 'Concept learning progress' });
+  await expect(restoredProgress).toBeVisible();
+  const restoredRow = restoredProgress.locator(`[data-concept-id="${conceptId}"]`);
+  await expect(restoredRow.getByRole('button', { name: 'Understood' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(restoredRow.locator('small')).toHaveText('understood');
+
   const persisted = await page.evaluate(async ({ analysisId, conceptId }) => {
     const response = await fetch(`/v1/learning/analyses/${encodeURIComponent(analysisId)}/concepts`, { credentials: 'include' });
     if (!response.ok) throw new Error(`learning state HTTP ${response.status}`);
