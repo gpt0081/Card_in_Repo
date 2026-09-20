@@ -95,4 +95,6 @@ Detailed architecture, data model, analysis pipeline, learning system, and imple
 
 ## Status
 
-Backend core prototype. Public GitHub repositories can be queued through Redis, commit-pinned and analyzed across Python files by a separate worker, then persisted as feature/flow maps and evidence-backed card shells in PostgreSQL. Long functions split at syntax boundaries. The mobile PWA, JavaScript/TypeScript analyzer, object-storage source artifacts, GitHub login, reliable job acknowledgement/retry semantics, and real LLM teaching/verification pipeline are still pending.
+Backend core prototype with a mobile PWA learning path. Public GitHub repositories can be queued through Redis, commit-pinned, and analyzed across Python, JavaScript, JSX, TypeScript, and TSX by a separate worker, then persisted as feature/flow maps and evidence-backed card shells in PostgreSQL. Long functions split at syntax boundaries. The Docker runtime acceptance path exercises real public Python and TypeScript repositories through READY -> Repository Map -> Files -> Concepts -> evidence-backed Cards -> on-demand Intermediate explanation.
+
+The largest remaining MVP gaps are JavaScript/TypeScript cross-file module/import resolution, object-storage source artifacts, GitHub login, reliable job acknowledgement/retry semantics, and the real LLM teaching/verification pipeline. C/Rust analysis and sandbox execution remain post-MVP.
