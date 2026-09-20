@@ -7,16 +7,29 @@ from typing import Any
 def build_feature_map(facts: dict[str, Any]) -> list[dict[str, Any]]:
     """Build conservative feature candidates from resolved calls.
 
-    Roots are top-level functions that are not called by another resolved function.
-    Each feature is the deterministic reachable call flow from one root. Cycles are
-    visited once. Unresolved calls never become graph edges. When the fact layer
-    knows a symbol's repository path, expose it on the flow step so downstream
-    teaching surfaces can show cross-file execution without re-inferring ownership.
+    Roots are repository-level functions and class-owned function-sized symbols that
+    are not called by another resolved function. Nested local functions remain scoped
+    implementation details rather than becoming repository features. Each feature is
+    the deterministic reachable call flow from one root. Cycles are visited once.
+    Unresolved calls never become graph edges. When the fact layer knows a symbol's
+    repository path, expose it on the flow step so downstream teaching surfaces can
+    show cross-file execution without re-inferring ownership.
     """
+    symbols_by_id = {symbol["id"]: symbol for symbol in facts["symbols"]}
+
+    def is_feature_function(symbol: dict[str, Any]) -> bool:
+        if symbol["kind"] != "function":
+            return False
+        parent_id = symbol.get("parent_symbol_id")
+        if parent_id is None:
+            return True
+        parent = symbols_by_id.get(parent_id)
+        return parent is not None and parent.get("kind") == "class"
+
     functions = {
         symbol["id"]: symbol
         for symbol in facts["symbols"]
-        if symbol["kind"] == "function" and symbol.get("parent_symbol_id") is None
+        if is_feature_function(symbol)
     }
     symbol_paths = facts.get("symbol_paths") or {}
     edges: dict[str, list[str]] = defaultdict(list)
@@ -45,6 +58,11 @@ def build_feature_map(facts: dict[str, Any]) -> list[dict[str, Any]]:
         path = symbol_paths.get(symbol_id)
         if path:
             step["path"] = path
+        parent_id = symbol.get("parent_symbol_id")
+        parent = symbols_by_id.get(parent_id) if parent_id else None
+        if parent is not None and parent.get("kind") == "class":
+            step["owner_symbol_id"] = parent_id
+            step["owner_symbol_name"] = parent["name"]
         return step
 
     features: list[dict[str, Any]] = []
