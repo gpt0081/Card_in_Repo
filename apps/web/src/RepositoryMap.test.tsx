@@ -1,10 +1,9 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { Feature } from './api';
 import RepositoryMap from './RepositoryMap';
 
-const features: Feature[] = [{
+const features = [{
   id:'feature:checkout', name:'Checkout flow', entry_symbol_id:'checkout',
   flow_steps:[
     {order:0,symbol_id:'checkout',symbol_name:'checkout',relation:'entry'},
