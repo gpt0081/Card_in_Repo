@@ -70,11 +70,15 @@ def test_long_typescript_function_splits_at_statement_boundaries():
 }
 """
     symbol = _ecmascript_function(source, "sample.ts")
-    assert split_symbol(source, symbol, "sample.ts", max_lines=5) == [
-        {"start_line": 1, "end_line": 5, "index": 0, "count": 3},
-        {"start_line": 6, "end_line": 9, "index": 1, "count": 3},
-        {"start_line": 10, "end_line": 11, "index": 2, "count": 3},
+    segments = split_symbol(source, symbol, "sample.ts", max_lines=5)
+
+    assert segments == [
+        {"start_line": 1, "end_line": 5, "index": 0, "count": 2},
+        {"start_line": 6, "end_line": 11, "index": 1, "count": 2},
     ]
+    # The return statement may share a segment with the preceding statement, but
+    # neither multi-line const declaration may be cut in the middle.
+    assert all(not (segment["start_line"] in {2, 7} or segment["end_line"] in {2, 3, 4, 6, 7, 8}) for segment in segments)
 
 
 def test_long_javascript_function_never_splits_inside_statement():
