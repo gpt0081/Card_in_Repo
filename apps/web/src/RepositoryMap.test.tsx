@@ -18,6 +18,11 @@ describe('RepositoryMap',()=>{
   it('distinguishes resolved flow from steps carrying unresolved dispatch evidence',()=>{
     const html=renderToStaticMarkup(<RepositoryMap features={features}/>);
     expect(html).toContain('Checkout flow');
+    expect(html).toContain('aria-label="Execution flow certainty"');
+    expect(html).toContain('Proven static flow');
+    expect(html).toContain('Runtime-dependent call');
+    expect(html).toContain('flowMarker--resolved');
+    expect(html).toContain('flowMarker--uncertain');
     expect(html).toContain('data-flow-certainty="resolved"');
     expect(html).toContain('flowStep--resolved');
     expect(html).toContain('data-flow-certainty="uncertain"');
