@@ -1,9 +1,11 @@
 export type AnalysisState = { id: string; state: string; repository?: string; commit_sha?: string; error?: string };
-export type FlowStep = { order: number; symbol_id: string; symbol_name?: string; relation?: string };
+export type SourceRange = {start?: {line?: number}; end?: {line?: number}};
+export type UnresolvedCallEvidence = { callee?:string; callee_kind?:string; receiver?:string; member_name?:string; dispatch?:'dynamic'|'unknown'|string; range?:SourceRange };
+export type FlowStep = { order: number; symbol_id: string; symbol_name?: string; relation?: string; unresolved_calls?:UnresolvedCallEvidence[] };
 export type Feature = { id: string; name: string; entry_symbol_id?: string; flow_steps: FlowStep[] };
-export type FileSymbol = { id: string; name: string; kind?: string; range?: {start?: {line?: number}; end?: {line?: number}} };
+export type FileSymbol = { id: string; name: string; kind?: string; range?: SourceRange };
 export type RepositoryFile = { path: string; symbols: FileSymbol[] };
-export type ConceptEvidence = { id:string; symbol_id:string; symbol_name:string; path?:string; range?: {start?: {line?: number}; end?: {line?: number}}; relation?:string; order:number };
+export type ConceptEvidence = { id:string; symbol_id:string; symbol_name:string; path?:string; range?: SourceRange; relation?:string; order:number };
 export type TeachingClaim = { text:string; evidence_ids:string[] };
 export type BasicExplanation = { level:'basic'; claims:TeachingClaim[]; verified:true };
 export type TeachingLevel = 'intermediate'|'advanced'|'deep';
