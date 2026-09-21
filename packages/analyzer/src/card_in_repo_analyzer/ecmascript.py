@@ -8,7 +8,7 @@ from tree_sitter import Language, Parser
 import tree_sitter_javascript
 import tree_sitter_typescript
 
-ANALYZER_VERSION = "ecmascript-tree-sitter-v0.2.0"
+ANALYZER_VERSION = "ecmascript-tree-sitter-v0.3.0"
 
 
 def _point(node: Any, which: str) -> dict[str, int]:
@@ -71,11 +71,26 @@ def _analyze(path: str, source_text: str, language_name: str, grammar: Any) -> d
 
     visit(tree.root_node)
     candidates: dict[str, list[str]] = defaultdict(list)
+    symbols_by_id = {symbol["id"]: symbol for symbol in symbols}
+    class_members: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
     for symbol in symbols:
         candidates[symbol["name"]].append(symbol["id"])
+        parent_id = symbol["parent_symbol_id"]
+        if parent_id is not None and symbols_by_id.get(parent_id, {}).get("kind") == "class":
+            class_members[parent_id][symbol["name"]].append(symbol["id"])
+
     for call in calls:
         callee = call["callee"]
-        matches = candidates.get(callee, []) if callee.isidentifier() else []
+        matches: list[str] = []
+        if callee.isidentifier():
+            matches = candidates.get(callee, [])
+        elif callee.startswith("this.") and callee.count(".") == 1:
+            member_name = callee.removeprefix("this.")
+            source_symbol = symbols_by_id.get(call["source_symbol_id"])
+            if source_symbol is not None:
+                class_id = source_symbol["parent_symbol_id"]
+                if class_id is not None and symbols_by_id.get(class_id, {}).get("kind") == "class":
+                    matches = class_members[class_id].get(member_name, [])
         if len(matches) == 1:
             call["resolved_target_id"] = matches[0]
         elif len(matches) > 1:
