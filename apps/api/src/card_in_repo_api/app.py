@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
-from card_in_repo_analyzer import analyze_python, build_feature_map, split_python_symbol
+from card_in_repo_analyzer import analyze_python, build_feature_map, split_symbol
 from .concepts import build_concept_candidates
 from .jobs import AnalysisJob, AnalysisJobQueue
 from .runtime import build_analysis_queue, build_analysis_store, build_teaching_provider
@@ -54,9 +54,6 @@ def health() -> dict[str, str]:
 
 
 def store_completed_analysis(repository: str, commit_sha: str, files: dict[str, str], facts: dict[str, Any], analysis_id: str | None = None, expected_delivery_id: str | None = None) -> dict[str, Any]:
-    # Persist the path relation as part of the fact layer. Single-file analyzers from
-    # early slices did not emit symbol_paths, but downstream Files/Concepts views must
-    # never depend on an ephemeral fallback used only while cards are being built.
     facts = dict(facts)
     symbols_list = facts.get("symbols", [])
     symbol_paths = dict(facts.get("symbol_paths") or {})
@@ -75,7 +72,7 @@ def store_completed_analysis(repository: str, commit_sha: str, files: dict[str, 
             symbol = symbols[step["symbol_id"]]
             path = symbol_paths[symbol["id"]]
             source = files[path]
-            segments = split_python_symbol(source, symbol)
+            segments = split_symbol(source, symbol, path)
             symbol_cards: list[dict[str, Any]] = []
             for segment_index, segment in enumerate(segments):
                 start, end = segment["start_line"], segment["end_line"]
@@ -219,40 +216,7 @@ def get_analysis_cards(analysis_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="analysis not found")
     if analysis.get("state") != "READY":
         raise HTTPException(status_code=409, detail="cards are available only after repository map is ready")
-    cards = []
-    for card_id in analysis.get("card_ids", []):
-        card = _STORE.get_card(card_id)
-        if card is not None:
-            cards.append(card)
-    return {"analysis_id": analysis_id, "cards": cards}
-
-
-@app.get("/v1/cards/{card_id}/teaching")
-def get_card_teaching(card_id: str, level: str = Query(...)) -> dict[str, Any]:
-    if level not in {"intermediate", "advanced", "deep"}:
-        raise HTTPException(status_code=422, detail="level must be intermediate, advanced, or deep")
-    card = _STORE.get_card(card_id)
-    if card is None:
-        raise HTTPException(status_code=404, detail="card not found")
-    cached = (card.get("on_demand_teaching") or {}).get(level)
-    if cached is not None:
-        try:
-            return verify_on_demand_card_explanation(card, cached, level)
-        except UnverifiedExplanation:
-            # Never publish stale/corrupt cached prose. Regenerate only through the normal verified path.
-            pass
-    if _TEACHING_PROVIDER is None:
-        raise HTTPException(status_code=503, detail="on-demand teaching provider is not configured")
-    try:
-        proposed = _TEACHING_PROVIDER.explain_card(card, level)
-        verified = verify_on_demand_card_explanation(card, proposed, level)
-        card["on_demand_teaching"] = {**(card.get("on_demand_teaching") or {}), level: verified}
-        _STORE.put_card(card)
-        return verified
-    except UnverifiedExplanation as exc:
-        raise HTTPException(status_code=422, detail="teaching output failed evidence verification") from exc
-    except TeachingProviderError as exc:
-        raise HTTPException(status_code=502, detail="teaching provider failed") from exc
+    return {"analysis_id": analysis_id, "cards": _STORE.list_cards(analysis_id)}
 
 
 @app.get("/v1/cards/{card_id}")
@@ -261,3 +225,25 @@ def get_card(card_id: str) -> dict[str, Any]:
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
     return card
+
+
+@app.get("/v1/cards/{card_id}/explanations/{level}")
+def get_card_explanation(card_id: str, level: str, refresh: bool = Query(False)) -> dict[str, Any]:
+    if level not in {"intermediate", "advanced", "deep"}:
+        raise HTTPException(status_code=422, detail="level must be intermediate, advanced, or deep")
+    card = _STORE.get_card(card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="card not found")
+    if not refresh:
+        cached = _STORE.get_card_explanation(card_id, level)
+        if cached is not None:
+            return cached
+    if _TEACHING_PROVIDER is None:
+        raise HTTPException(status_code=503, detail="teaching provider is not configured")
+    try:
+        draft = _TEACHING_PROVIDER.explain(card, level)
+        explanation = verify_on_demand_card_explanation(card, level, draft)
+    except (TeachingProviderError, UnverifiedExplanation) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    _STORE.put_card_explanation(card_id, level, explanation)
+    return explanation
