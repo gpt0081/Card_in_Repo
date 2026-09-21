@@ -50,7 +50,22 @@ def test_class_methods_and_arrow_fields_are_function_sized_symbols():
     assert by_name["transform"]["is_async"] is True
     member_call = next(call for call in result["calls"] if call["callee"] == "this.finish")
     assert member_call["source_symbol_id"] == by_name["execute"]["id"]
-    assert member_call["resolved_target_id"] is None
+    assert member_call["resolved_target_id"] == by_name["finish"]["id"]
+
+
+def test_this_member_resolution_stays_within_owning_class():
+    result = analyze_javascript("src/classes.js", """class Alpha {
+  run() { return this.finish(); }
+  finish() { return 1; }
+}
+class Beta {
+  finish() { return 2; }
+}
+""")
+    alpha = next(symbol for symbol in result["symbols"] if symbol["name"] == "Alpha")
+    alpha_finish = next(symbol for symbol in result["symbols"] if symbol["name"] == "finish" and symbol["parent_symbol_id"] == alpha["id"])
+    member_call = next(call for call in result["calls"] if call["callee"] == "this.finish")
+    assert member_call["resolved_target_id"] == alpha_finish["id"]
 
 
 def test_member_calls_are_not_falsely_resolved():
