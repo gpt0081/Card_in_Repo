@@ -57,3 +57,27 @@ def test_member_calls_are_not_falsely_resolved():
     result = analyze_javascript("src/member.js", "function run() {}\nclient.run();\n")
     member_call = next(call for call in result["calls"] if call["callee"] == "client.run")
     assert member_call["resolved_target_id"] is None
+
+
+def test_this_member_call_stays_unresolved_when_subclass_can_override_target():
+    result = analyze_javascript("src/inheritance.js", """class Base {
+  run() { return this.finish(); }
+  finish() { return 'base'; }
+}
+class Derived extends Base {
+  finish() { return 'derived'; }
+}
+new Derived().run();
+""")
+    member_call = next(call for call in result["calls"] if call["callee"] == "this.finish")
+    assert member_call["resolved_target_id"] is None
+
+
+def test_this_member_call_stays_unresolved_across_static_and_instance_sides():
+    result = analyze_javascript("src/static.js", """class Service {
+  static run() { return this.finish(); }
+  finish() { return 1; }
+}
+""")
+    member_call = next(call for call in result["calls"] if call["callee"] == "this.finish")
+    assert member_call["resolved_target_id"] is None
