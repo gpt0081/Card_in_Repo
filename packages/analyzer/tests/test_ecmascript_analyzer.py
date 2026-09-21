@@ -15,6 +15,8 @@ class Service { execute() { return run(); } }
     assert result["imports"][0]["text"].startswith("import { read }")
     helper_call = next(call for call in result["calls"] if call["callee"] == "helper")
     assert helper_call["resolved_target_id"] == by_name["helper"]["id"]
+    assert helper_call["callee_kind"] == "identifier"
+    assert helper_call["dispatch"] == "lexical"
     assert all(symbol["range"]["start"]["line"] >= 1 for symbol in result["symbols"])
 
 
@@ -51,12 +53,20 @@ def test_class_methods_and_arrow_fields_are_function_sized_symbols():
     member_call = next(call for call in result["calls"] if call["callee"] == "this.finish")
     assert member_call["source_symbol_id"] == by_name["execute"]["id"]
     assert member_call["resolved_target_id"] is None
+    assert member_call["callee_kind"] == "member"
+    assert member_call["receiver"] == "this"
+    assert member_call["member_name"] == "finish"
+    assert member_call["dispatch"] == "dynamic"
 
 
 def test_member_calls_are_not_falsely_resolved():
     result = analyze_javascript("src/member.js", "function run() {}\nclient.run();\n")
     member_call = next(call for call in result["calls"] if call["callee"] == "client.run")
     assert member_call["resolved_target_id"] is None
+    assert member_call["callee_kind"] == "member"
+    assert member_call["receiver"] == "client"
+    assert member_call["member_name"] == "run"
+    assert member_call["dispatch"] == "unknown"
 
 
 def test_this_member_call_stays_unresolved_when_subclass_can_override_target():
@@ -71,6 +81,7 @@ new Derived().run();
 """)
     member_call = next(call for call in result["calls"] if call["callee"] == "this.finish")
     assert member_call["resolved_target_id"] is None
+    assert member_call["dispatch"] == "dynamic"
 
 
 def test_this_member_call_stays_unresolved_across_static_and_instance_sides():
@@ -81,3 +92,4 @@ def test_this_member_call_stays_unresolved_across_static_and_instance_sides():
 """)
     member_call = next(call for call in result["calls"] if call["callee"] == "this.finish")
     assert member_call["resolved_target_id"] is None
+    assert member_call["dispatch"] == "dynamic"
