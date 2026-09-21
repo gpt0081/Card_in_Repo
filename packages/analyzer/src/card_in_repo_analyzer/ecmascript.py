@@ -8,7 +8,7 @@ from tree_sitter import Language, Parser
 import tree_sitter_javascript
 import tree_sitter_typescript
 
-ANALYZER_VERSION = "ecmascript-tree-sitter-v0.2.0"
+ANALYZER_VERSION = "ecmascript-tree-sitter-v0.3.0"
 
 
 def _point(node: Any, which: str) -> dict[str, int]:
@@ -22,6 +22,23 @@ def _range(node: Any) -> dict[str, dict[str, int]]:
 
 def _text(source: bytes, node: Any) -> str:
     return source[node.start_byte : node.end_byte].decode("utf-8")
+
+
+def _call_evidence(source: bytes, function_node: Any) -> dict[str, Any]:
+    if function_node.type == "identifier":
+        return {"callee_kind": "identifier", "receiver": None, "member_name": None, "dispatch": "lexical"}
+    if function_node.type == "member_expression":
+        object_node = function_node.child_by_field_name("object")
+        property_node = function_node.child_by_field_name("property")
+        receiver = _text(source, object_node) if object_node is not None else None
+        member_name = _text(source, property_node) if property_node is not None else None
+        return {
+            "callee_kind": "member",
+            "receiver": receiver,
+            "member_name": member_name,
+            "dispatch": "dynamic" if receiver == "this" else "unknown",
+        }
+    return {"callee_kind": "expression", "receiver": None, "member_name": None, "dispatch": "unknown"}
 
 
 def _analyze(path: str, source_text: str, language_name: str, grammar: Any) -> dict[str, Any]:
@@ -63,7 +80,7 @@ def _analyze(path: str, source_text: str, language_name: str, grammar: Any) -> d
         elif node.type == "call_expression":
             function_node = node.child_by_field_name("function")
             if function_node is not None:
-                calls.append({"source_symbol_id": parent_symbol, "callee": _text(source, function_node), "range": _range(node), "resolved_target_id": None})
+                calls.append({"source_symbol_id": parent_symbol, "callee": _text(source, function_node), "range": _range(node), "resolved_target_id": None, **_call_evidence(source, function_node)})
         if node.type == "ERROR" or node.is_missing:
             warnings.append({"code": "PARSE_RECOVERY", "range": _range(node)})
         for child in node.children:
@@ -75,7 +92,7 @@ def _analyze(path: str, source_text: str, language_name: str, grammar: Any) -> d
         candidates[symbol["name"]].append(symbol["id"])
     for call in calls:
         callee = call["callee"]
-        matches = candidates.get(callee, []) if callee.isidentifier() else []
+        matches = candidates.get(callee, []) if call["callee_kind"] == "identifier" else []
         if len(matches) == 1:
             call["resolved_target_id"] = matches[0]
         elif len(matches) > 1:
