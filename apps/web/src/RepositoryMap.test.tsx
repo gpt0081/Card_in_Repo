@@ -1,9 +1,10 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { Feature } from './api';
 import RepositoryMap from './RepositoryMap';
 
-const features = [{
+const features: Feature[] = [{
   id:'feature:checkout', name:'Checkout flow', entry_symbol_id:'checkout',
   flow_steps:[
     {order:0,symbol_id:'checkout',symbol_name:'checkout',relation:'entry'},
@@ -18,7 +19,7 @@ describe('RepositoryMap',()=>{
   it('distinguishes resolved flow from steps carrying unresolved dispatch evidence',()=>{
     const html=renderToStaticMarkup(<RepositoryMap features={features}/>);
     expect(html).toContain('Checkout flow');
-    expect(html).toContain('Execution flow certainty');
+    expect(html).toContain('aria-label="Execution flow certainty"');
     expect(html).toContain('Proven static flow');
     expect(html).toContain('Runtime-dependent call');
     expect(html).toContain('data-flow-certainty="resolved"');
