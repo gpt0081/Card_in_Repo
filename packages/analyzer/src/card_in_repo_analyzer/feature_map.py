@@ -11,9 +11,10 @@ def build_feature_map(facts: dict[str, Any]) -> list[dict[str, Any]]:
     are not called by another resolved function. Nested local functions remain scoped
     implementation details rather than becoming repository features. Each feature is
     the deterministic reachable call flow from one root. Cycles are visited once.
-    Unresolved calls never become graph edges. When the fact layer knows a symbol's
-    repository path, expose it on the flow step so downstream teaching surfaces can
-    show cross-file execution without re-inferring ownership.
+    Unresolved calls never become graph edges, but statically observed call evidence is
+    attached to its source step so downstream teaching/UI layers can explain dynamic or
+    unknown dispatch without inventing a target. When the fact layer knows a symbol's
+    repository path, expose it on the flow step too.
     """
     symbols_by_id = {symbol["id"]: symbol for symbol in facts["symbols"]}
 
@@ -34,6 +35,7 @@ def build_feature_map(facts: dict[str, Any]) -> list[dict[str, Any]]:
     symbol_paths = facts.get("symbol_paths") or {}
     edges: dict[str, list[str]] = defaultdict(list)
     incoming: dict[str, int] = {symbol_id: 0 for symbol_id in functions}
+    unresolved_calls: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
     for call in facts["calls"]:
         source = call.get("source_symbol_id")
@@ -41,6 +43,13 @@ def build_feature_map(facts: dict[str, Any]) -> list[dict[str, Any]]:
         if source in functions and target in functions and target not in edges[source]:
             edges[source].append(target)
             incoming[target] += 1
+        elif source in functions and target is None:
+            evidence = {
+                key: call[key]
+                for key in ("callee", "callee_kind", "receiver", "member_name", "dispatch", "range")
+                if key in call
+            }
+            unresolved_calls[source].append(evidence)
 
     roots = [symbol_id for symbol_id in functions if incoming[symbol_id] == 0]
     # A pure cycle has no indegree-zero node. Keep it visible rather than dropping it.
@@ -63,6 +72,8 @@ def build_feature_map(facts: dict[str, Any]) -> list[dict[str, Any]]:
         if parent is not None and parent.get("kind") == "class":
             step["owner_symbol_id"] = parent_id
             step["owner_symbol_name"] = parent["name"]
+        if unresolved_calls.get(symbol_id):
+            step["unresolved_calls"] = unresolved_calls[symbol_id]
         return step
 
     features: list[dict[str, Any]] = []

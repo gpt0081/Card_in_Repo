@@ -56,6 +56,38 @@ def test_typescript_class_functions_are_visible_with_class_ownership():
         assert step["owner_symbol_id"]
 
 
+def test_dynamic_member_call_evidence_survives_without_becoming_graph_edge():
+    facts = analyze_repository({
+        "src/service.ts": "class Service {\n  execute() { return this.finish(); }\n  finish() { return 'ok'; }\n}\n",
+    })
+    features = build_feature_map(facts)
+
+    execute = next(feature for feature in features if feature["name"] == "execute")
+    assert [step["symbol_name"] for step in execute["flow_steps"]] == ["execute"]
+    call = execute["flow_steps"][0]["unresolved_calls"][0]
+    assert call["callee"] == "this.finish"
+    assert call["callee_kind"] == "member"
+    assert call["receiver"] == "this"
+    assert call["member_name"] == "finish"
+    assert call["dispatch"] == "dynamic"
+    assert call["range"]["start"]["line"] == 2
+
+
+def test_unknown_object_dispatch_is_exposed_as_evidence_not_edge():
+    facts = analyze_repository({
+        "src/main.ts": "function entry(client: any) { return client.run(); }\nfunction run() { return 'local'; }\n",
+    })
+    features = build_feature_map(facts)
+
+    entry = next(feature for feature in features if feature["name"] == "entry")
+    assert [step["symbol_name"] for step in entry["flow_steps"]] == ["entry"]
+    call = entry["flow_steps"][0]["unresolved_calls"][0]
+    assert call["callee"] == "client.run"
+    assert call["receiver"] == "client"
+    assert call["member_name"] == "run"
+    assert call["dispatch"] == "unknown"
+
+
 def test_nested_local_function_does_not_become_repository_feature():
     facts = analyze_repository({
         "src/main.ts": "function entry() { function helper() { return 1; } return helper(); }\n",
