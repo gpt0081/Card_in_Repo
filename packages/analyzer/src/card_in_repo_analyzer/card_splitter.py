@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from tree_sitter import Language, Parser
+import tree_sitter_javascript
 import tree_sitter_python
+import tree_sitter_typescript
 
 DEFAULT_MAX_CARD_LINES = 40
 
@@ -12,15 +15,29 @@ def _line_range(node: Any) -> tuple[int, int]:
     return node.start_point.row + 1, node.end_point.row + 1
 
 
-def _function_node(source: bytes, symbol: dict[str, Any]) -> Any | None:
-    parser = Parser(Language(tree_sitter_python.language()))
+def _language_for_path(path: str) -> tuple[Language, set[str]]:
+    suffix = Path(path).suffix.lower()
+    if suffix == ".py":
+        return Language(tree_sitter_python.language()), {"function_definition"}
+    if suffix in {".js", ".jsx"}:
+        return Language(tree_sitter_javascript.language()), {"function_declaration", "function_expression", "arrow_function", "method_definition"}
+    if suffix == ".ts":
+        return Language(tree_sitter_typescript.language_typescript()), {"function_declaration", "function_expression", "arrow_function", "method_definition"}
+    if suffix == ".tsx":
+        return Language(tree_sitter_typescript.language_tsx()), {"function_declaration", "function_expression", "arrow_function", "method_definition"}
+    raise ValueError(f"unsupported source path for card splitting: {path}")
+
+
+def _function_node(source: bytes, symbol: dict[str, Any], path: str) -> Any | None:
+    language, function_types = _language_for_path(path)
+    parser = Parser(language)
     tree = parser.parse(source)
     wanted_start = symbol["range"]["start"]["line"]
     wanted_end = symbol["range"]["end"]["line"]
     stack = [tree.root_node]
     while stack:
         node = stack.pop()
-        if node.type == "function_definition":
+        if node.type in function_types:
             start, end = _line_range(node)
             if start == wanted_start and end == wanted_end:
                 return node
@@ -28,12 +45,13 @@ def _function_node(source: bytes, symbol: dict[str, Any]) -> Any | None:
     return None
 
 
-def split_python_symbol(
+def split_symbol(
     source_text: str,
     symbol: dict[str, Any],
+    path: str,
     max_lines: int = DEFAULT_MAX_CARD_LINES,
 ) -> list[dict[str, Any]]:
-    """Return syntax-aligned card segments for a Python function.
+    """Return syntax-aligned card segments for a supported function symbol.
 
     Short functions remain one card. Long functions are split only between direct
     body statements, never at arbitrary line counts. A single oversized statement
@@ -47,7 +65,7 @@ def split_python_symbol(
         return [{"start_line": start, "end_line": end}]
 
     source = source_text.encode("utf-8")
-    function = _function_node(source, symbol)
+    function = _function_node(source, symbol, path)
     if function is None:
         return [{"start_line": start, "end_line": end}]
     body = function.child_by_field_name("body")
@@ -70,3 +88,12 @@ def split_python_symbol(
         segment["index"] = index
         segment["count"] = len(segments)
     return segments
+
+
+def split_python_symbol(
+    source_text: str,
+    symbol: dict[str, Any],
+    max_lines: int = DEFAULT_MAX_CARD_LINES,
+) -> list[dict[str, Any]]:
+    """Backward-compatible Python-specific splitter."""
+    return split_symbol(source_text, symbol, "source.py", max_lines)
