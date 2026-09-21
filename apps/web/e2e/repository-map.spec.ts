@@ -64,3 +64,41 @@ test('public TypeScript repository reaches READY and produces evidence-backed le
   await expect(page.getByRole('heading', { name: 'File structure' })).toBeVisible();
   await expect(page.locator('article.file').filter({ hasText: /\.tsx?|\.jsx?/ }).first()).toBeVisible();
 });
+
+test('restored feature route renders unresolved call evidence from the API payload', async ({ page }) => {
+  const baseUrl = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:8080';
+  const analysisId = 'call-evidence-regression';
+
+  await page.route(`**/v1/analyses/${analysisId}`, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ id: analysisId, state: 'READY', repository: 'https://github.com/example/repo' }),
+  }));
+  await page.route(`**/v1/analyses/${analysisId}/features`, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      analysis_id: analysisId,
+      features: [{
+        id: 'feature:run',
+        name: 'Run flow',
+        entry_symbol_id: 'symbol:start',
+        flow_steps: [{
+          order: 0,
+          symbol_id: 'symbol:start',
+          symbol_name: 'start',
+          relation: 'entry',
+          unresolved_calls: [
+            { callee: 'this.finish', callee_kind: 'member', receiver: 'this', member_name: 'finish', dispatch: 'dynamic' },
+            { callee: 'client.run', callee_kind: 'member', receiver: 'client', member_name: 'run', dispatch: 'unknown' },
+          ],
+        }],
+      }],
+    }),
+  }));
+
+  await page.goto(`${baseUrl}/?analysis=${analysisId}&view=features`);
+  await expect(page.getByRole('heading', { name: 'Repository map' })).toBeVisible();
+  await expect(page.locator('[data-dispatch="dynamic"]')).toContainText('this.finish');
+  await expect(page.locator('[data-dispatch="dynamic"]')).toContainText('dynamic dispatch');
+  await expect(page.locator('[data-dispatch="unknown"]')).toContainText('client.run');
+  await expect(page.locator('[data-dispatch="unknown"]')).toContainText('target unknown');
+});
