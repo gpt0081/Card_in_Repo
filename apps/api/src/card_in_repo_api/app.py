@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
-from card_in_repo_analyzer import analyze_python, build_feature_map, split_python_symbol
+from card_in_repo_analyzer import analyze_python, build_feature_map, split_symbol
 from .concepts import build_concept_candidates
 from .jobs import AnalysisJob, AnalysisJobQueue
 from .runtime import build_analysis_queue, build_analysis_store, build_teaching_provider
@@ -75,7 +75,7 @@ def store_completed_analysis(repository: str, commit_sha: str, files: dict[str, 
             symbol = symbols[step["symbol_id"]]
             path = symbol_paths[symbol["id"]]
             source = files[path]
-            segments = split_python_symbol(source, symbol)
+            segments = split_symbol(source, symbol, path)
             symbol_cards: list[dict[str, Any]] = []
             for segment_index, segment in enumerate(segments):
                 start, end = segment["start_line"], segment["end_line"]
@@ -239,7 +239,6 @@ def get_card_teaching(card_id: str, level: str = Query(...)) -> dict[str, Any]:
         try:
             return verify_on_demand_card_explanation(card, cached, level)
         except UnverifiedExplanation:
-            # Never publish stale/corrupt cached prose. Regenerate only through the normal verified path.
             pass
     if _TEACHING_PROVIDER is None:
         raise HTTPException(status_code=503, detail="on-demand teaching provider is not configured")
