@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import FlowCardScope from './FlowCardScope';
-import { LearningCard } from './api';
+import type { LearningCard } from './api';
 
 function card(id: string, symbolId: string): LearningCard {
   return {
@@ -18,20 +18,34 @@ function card(id: string, symbolId: string): LearningCard {
   };
 }
 
+function renderScope(cards: LearningCard[], selectedSymbolId: string) {
+  return renderToStaticMarkup(
+    <FlowCardScope cards={cards} selectedSymbolId={selectedSymbolId}>
+      {visible => <>{visible.map(item => <span key={item.id}>{item.id}</span>)}</>}
+    </FlowCardScope>,
+  );
+}
+
 describe('FlowCardScope', () => {
   it('renders only cards with the exact analyzer symbol id', () => {
-    const cards = [card('checkout-card', 'symbol:checkout'), card('search-card', 'symbol:search')];
-    render(<FlowCardScope cards={cards} selectedSymbolId="symbol:checkout">{visible => <>{visible.map(item => <span key={item.id}>{item.id}</span>)}</>}</FlowCardScope>);
-    expect(screen.getByText('checkout-card')).toBeInTheDocument();
-    expect(screen.queryByText('search-card')).not.toBeInTheDocument();
-    expect(screen.getByText(/1 function card follow/)).toHaveAttribute('data-flow-scoped', 'true');
+    const html = renderScope(
+      [card('checkout-card', 'symbol:checkout'), card('search-card', 'symbol:search')],
+      'symbol:checkout',
+    );
+    expect(html).toContain('checkout-card');
+    expect(html).not.toContain('search-card');
+    expect(html).toContain('data-flow-scoped="true"');
+    expect(html).toContain('1 function card follow');
   });
 
   it('fails open to verified cards when there is no exact symbol match', () => {
-    const cards = [card('checkout-card', 'symbol:checkout'), card('search-card', 'symbol:search')];
-    render(<FlowCardScope cards={cards} selectedSymbolId="symbol:missing">{visible => <>{visible.map(item => <span key={item.id}>{item.id}</span>)}</>}</FlowCardScope>);
-    expect(screen.getByText('checkout-card')).toBeInTheDocument();
-    expect(screen.getByText('search-card')).toBeInTheDocument();
-    expect(screen.getByText(/No exact function card matches/)).toHaveAttribute('data-flow-scoped', 'false');
+    const html = renderScope(
+      [card('checkout-card', 'symbol:checkout'), card('search-card', 'symbol:search')],
+      'symbol:missing',
+    );
+    expect(html).toContain('checkout-card');
+    expect(html).toContain('search-card');
+    expect(html).toContain('data-flow-scoped="false"');
+    expect(html).toContain('No exact function card matches');
   });
 });
