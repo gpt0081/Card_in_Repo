@@ -109,7 +109,7 @@ test('mobile flow-step selection opens the matching static-analysis symbol in Fi
   await flowStep.click();
 
   await expect(page.getByRole('heading', { name: 'File structure' })).toBeVisible();
-  const selected = page.locator('#symbol-symbol%3Acheckout');
+  const selected = page.locator('[id="symbol-symbol%3Acheckout"]');
   await expect(selected).toHaveAttribute('data-selected', 'true');
   await expect(selected).toHaveAttribute('aria-current', 'location');
   await expect(selected).toBeFocused();
