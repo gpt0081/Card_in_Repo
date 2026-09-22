@@ -52,14 +52,8 @@ test('public Python repository reaches READY and follows feature, files, concept
 });
 
 test('public TypeScript repository reaches READY and produces evidence-backed learning cards', async ({ page }) => {
-  // Use a tiny, active public repository with ordinary named TypeScript functions. This
-  // exercises the real GitHub network path while also matching the function-sized-card
-  // contract that the current fact layer is expected to support.
   test.setTimeout(120_000);
   await proveLearningPath(page, 'https://github.com/TheInvader360/fc64js-typescript-basic-example');
-
-  // proveLearningPath ends in Cards, so explicitly return to Files before asserting that
-  // the fetched public snapshot actually contains JavaScript/TypeScript-family source.
   await page.getByRole('button', { name: 'Files' }).click();
   await expect(page.getByRole('heading', { name: 'File structure' })).toBeVisible();
   await expect(page.locator('article.file').filter({ hasText: /\.tsx?|\.jsx?/ }).first()).toBeVisible();
@@ -70,52 +64,55 @@ test('restored feature route keeps certainty cues readable on a narrow mobile vi
   const analysisId = 'call-evidence-regression';
   await page.setViewportSize({ width: 390, height: 844 });
 
+  await page.route(`**/v1/analyses/${analysisId}`, route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: analysisId, state: 'READY', repository: 'https://github.com/example/repo' }) }));
+  await page.route(`**/v1/analyses/${analysisId}/features`, route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ analysis_id: analysisId, features: [{ id: 'feature:run', name: 'Run flow', entry_symbol_id: 'symbol:start', flow_steps: [{ order: 0, symbol_id: 'symbol:start', symbol_name: 'start', relation: 'entry' }, { order: 1, symbol_id: 'symbol:finish', symbol_name: 'finish', relation: 'calls', unresolved_calls: [{ callee: 'this.finish', callee_kind: 'member', receiver: 'this', member_name: 'finish', dispatch: 'dynamic' }, { callee: 'client.run', callee_kind: 'member', receiver: 'client', member_name: 'run', dispatch: 'unknown' }] }] }] }) }));
+
+  await page.goto(`${baseUrl}/?analysis=${analysisId}&view=features`);
+  await expect(page.getByRole('heading', { name: 'Repository map' })).toBeVisible();
+  const legend = page.getByLabel('Execution flow certainty');
+  await expect(legend).toBeVisible();
+  await expect(legend).toContainText('Proven static flow');
+  await expect(legend).toContainText('Runtime-dependent call');
+  await expect(legend).toHaveCSS('display', 'grid');
+  await expect(page.locator('[data-flow-certainty="resolved"]')).toContainText('start');
+  await expect(page.locator('[data-flow-certainty="resolved"] .flowMarker--resolved')).toBeVisible();
+  await expect(page.locator('[data-flow-certainty="uncertain"]')).toContainText('finish');
+  await expect(page.locator('[data-flow-certainty="uncertain"] .flowMarker--uncertain')).toBeVisible();
+  await expect(page.locator('[data-flow-certainty="uncertain"]')).toHaveCSS('border-left-style', 'dashed');
+  await expect(page.locator('[data-dispatch="dynamic"]')).toContainText('this.finish');
+  await expect(page.locator('[data-dispatch="dynamic"]')).toContainText('dynamic dispatch');
+  await expect(page.locator('[data-dispatch="unknown"]')).toContainText('client.run');
+  await expect(page.locator('[data-dispatch="unknown"]')).toContainText('target unknown');
+});
+
+test('mobile flow-step selection opens the matching static-analysis symbol in File Structure', async ({ page }) => {
+  const baseUrl = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:8080';
+  const analysisId = 'flow-file-navigation';
+  await page.setViewportSize({ width: 390, height: 844 });
+
   await page.route(`**/v1/analyses/${analysisId}`, route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ id: analysisId, state: 'READY', repository: 'https://github.com/example/repo' }),
   }));
   await page.route(`**/v1/analyses/${analysisId}/features`, route => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify({
-      analysis_id: analysisId,
-      features: [{
-        id: 'feature:run',
-        name: 'Run flow',
-        entry_symbol_id: 'symbol:start',
-        flow_steps: [
-          { order: 0, symbol_id: 'symbol:start', symbol_name: 'start', relation: 'entry' },
-          {
-            order: 1,
-            symbol_id: 'symbol:finish',
-            symbol_name: 'finish',
-            relation: 'calls',
-            unresolved_calls: [
-              { callee: 'this.finish', callee_kind: 'member', receiver: 'this', member_name: 'finish', dispatch: 'dynamic' },
-              { callee: 'client.run', callee_kind: 'member', receiver: 'client', member_name: 'run', dispatch: 'unknown' },
-            ],
-          },
-        ],
-      }],
-    }),
+    body: JSON.stringify({ analysis_id: analysisId, features: [{ id: 'feature:checkout', name: 'Checkout', flow_steps: [{ order: 0, symbol_id: 'symbol:checkout', symbol_name: 'checkout', relation: 'entry' }] }] }),
+  }));
+  await page.route(`**/v1/analyses/${analysisId}/files`, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ analysis_id: analysisId, files: [{ path: 'src/checkout.ts', symbols: [{ id: 'symbol:checkout', name: 'checkout', kind: 'function', range: { start: { line: 12 }, end: { line: 24 } } }] }] }),
   }));
 
   await page.goto(`${baseUrl}/?analysis=${analysisId}&view=features`);
-  await expect(page.getByRole('heading', { name: 'Repository map' })).toBeVisible();
+  const flowStep = page.getByRole('button', { name: 'Open checkout in file structure' });
+  await expect(flowStep).toBeVisible();
+  await flowStep.click();
 
-  const legend = page.getByLabel('Execution flow certainty');
-  await expect(legend).toBeVisible();
-  await expect(legend).toContainText('Proven static flow');
-  await expect(legend).toContainText('Runtime-dependent call');
-  await expect(legend).toHaveCSS('display', 'grid');
-
-  await expect(page.locator('[data-flow-certainty="resolved"]')).toContainText('start');
-  await expect(page.locator('[data-flow-certainty="resolved"] .flowMarker--resolved')).toBeVisible();
-  await expect(page.locator('[data-flow-certainty="uncertain"]')).toContainText('finish');
-  await expect(page.locator('[data-flow-certainty="uncertain"] .flowMarker--uncertain')).toBeVisible();
-  await expect(page.locator('[data-flow-certainty="uncertain"]')).toHaveCSS('border-left-style', 'dashed');
-
-  await expect(page.locator('[data-dispatch="dynamic"]')).toContainText('this.finish');
-  await expect(page.locator('[data-dispatch="dynamic"]')).toContainText('dynamic dispatch');
-  await expect(page.locator('[data-dispatch="unknown"]')).toContainText('client.run');
-  await expect(page.locator('[data-dispatch="unknown"]')).toContainText('target unknown');
+  await expect(page.getByRole('heading', { name: 'File structure' })).toBeVisible();
+  const selected = page.locator('#symbol-symbol%3Acheckout');
+  await expect(selected).toHaveAttribute('data-selected', 'true');
+  await expect(selected).toHaveAttribute('aria-current', 'location');
+  await expect(selected).toBeFocused();
+  await expect(selected).toContainText('checkout');
+  await expect(selected).toContainText('12–24');
 });
