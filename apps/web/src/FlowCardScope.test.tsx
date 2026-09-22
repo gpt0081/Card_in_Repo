@@ -6,10 +6,11 @@ import { LearningCard } from './api';
 function card(id: string, symbolId: string): LearningCard {
   return {
     id,
+    analysis_id: 'analysis:test',
     symbol_id: symbolId,
     symbol_name: id,
     path: 'src/app.ts',
-    range: { start: { line: 1, column: 0 }, end: { line: 2, column: 0 } },
+    range: { start: { line: 1 }, end: { line: 2 } },
     source: 'function x() {}',
     segment: { index: 0, count: 1 },
     evidence: [],
