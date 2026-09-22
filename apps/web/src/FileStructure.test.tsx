@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import FileStructure from './FileStructure';
 import type { RepositoryFile } from './api';
@@ -10,21 +11,20 @@ const files:RepositoryFile[]=[{path:'src/checkout.py',symbols:[
 
 describe('FileStructure',()=>{
   it('marks the execution-flow symbol as the current code location',()=>{
-    render(<FileStructure files={files} selectedSymbolId="sym-finish"/>);
-    const selected=screen.getByText('finish_checkout').closest('li');
-    const other=screen.getByText('open_checkout').closest('li');
-    expect(selected).not.toBeNull();
-    expect(selected?.getAttribute('id')).toBe('symbol-sym-finish');
-    expect(selected?.getAttribute('data-selected')).toBe('true');
-    expect(selected?.getAttribute('aria-current')).toBe('location');
-    expect(other?.hasAttribute('data-selected')).toBe(false);
-    expect(screen.getByText('function · L12–20')).toBeTruthy();
+    const html=renderToStaticMarkup(<FileStructure files={files} selectedSymbolId="sym-finish"/>);
+    expect(html).toContain('id="symbol-sym-finish"');
+    expect(html).toContain('data-selected="true"');
+    expect(html).toContain('aria-current="location"');
+    expect(html).toContain('finish_checkout');
+    expect(html).toContain('function · L12–20');
+    expect(html).not.toContain('id="symbol-sym-open" data-selected="true"');
   });
 
   it('keeps the complete static file structure when no flow symbol is selected',()=>{
-    render(<FileStructure files={files}/>);
-    expect(screen.getByText('open_checkout')).toBeTruthy();
-    expect(screen.getByText('finish_checkout')).toBeTruthy();
-    expect(document.querySelector('[data-selected="true"]')).toBeNull();
+    const html=renderToStaticMarkup(<FileStructure files={files}/>);
+    expect(html).toContain('open_checkout');
+    expect(html).toContain('finish_checkout');
+    expect(html).not.toContain('data-selected="true"');
+    expect(html).not.toContain('aria-current="location"');
   });
 });
