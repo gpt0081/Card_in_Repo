@@ -10,7 +10,7 @@ export default function FlowContext({ concepts, symbolId, onReturnToCode }: { co
   const related = conceptsForSymbol(concepts, symbolId);
   return <aside className="flowContext" aria-label="Selected execution context" data-symbol-id={symbolId}>
     <strong>Following selected code</strong>
-    <p>{related.length ? `${related.length} evidence-backed concept${related.length === 1 ? '' : 's'} reference this symbol.` : 'No evidence-backed concept references this symbol yet.'}</p>
+    <p>{related.length ? `${related.length} evidence-backed concept${related.length === 1 ? '' : 's'} ${related.length === 1 ? 'references' : 'reference'} this symbol.` : 'No evidence-backed concept references this symbol yet.'}</p>
     <button type="button" onClick={onReturnToCode}>Return to selected code</button>
   </aside>;
 }
