@@ -65,9 +65,10 @@ test('public TypeScript repository reaches READY and produces evidence-backed le
   await expect(page.locator('article.file').filter({ hasText: /\.tsx?|\.jsx?/ }).first()).toBeVisible();
 });
 
-test('restored feature route renders unresolved call evidence from the API payload', async ({ page }) => {
+test('restored feature route keeps certainty cues readable on a narrow mobile viewport', async ({ page }) => {
   const baseUrl = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:8080';
   const analysisId = 'call-evidence-regression';
+  await page.setViewportSize({ width: 390, height: 844 });
 
   await page.route(`**/v1/analyses/${analysisId}`, route => route.fulfill({
     contentType: 'application/json',
@@ -81,22 +82,38 @@ test('restored feature route renders unresolved call evidence from the API paylo
         id: 'feature:run',
         name: 'Run flow',
         entry_symbol_id: 'symbol:start',
-        flow_steps: [{
-          order: 0,
-          symbol_id: 'symbol:start',
-          symbol_name: 'start',
-          relation: 'entry',
-          unresolved_calls: [
-            { callee: 'this.finish', callee_kind: 'member', receiver: 'this', member_name: 'finish', dispatch: 'dynamic' },
-            { callee: 'client.run', callee_kind: 'member', receiver: 'client', member_name: 'run', dispatch: 'unknown' },
-          ],
-        }],
+        flow_steps: [
+          { order: 0, symbol_id: 'symbol:start', symbol_name: 'start', relation: 'entry' },
+          {
+            order: 1,
+            symbol_id: 'symbol:finish',
+            symbol_name: 'finish',
+            relation: 'calls',
+            unresolved_calls: [
+              { callee: 'this.finish', callee_kind: 'member', receiver: 'this', member_name: 'finish', dispatch: 'dynamic' },
+              { callee: 'client.run', callee_kind: 'member', receiver: 'client', member_name: 'run', dispatch: 'unknown' },
+            ],
+          },
+        ],
       }],
     }),
   }));
 
   await page.goto(`${baseUrl}/?analysis=${analysisId}&view=features`);
   await expect(page.getByRole('heading', { name: 'Repository map' })).toBeVisible();
+
+  const legend = page.getByLabel('Execution flow certainty');
+  await expect(legend).toBeVisible();
+  await expect(legend).toContainText('Proven static flow');
+  await expect(legend).toContainText('Runtime-dependent call');
+  await expect(legend).toHaveCSS('display', 'grid');
+
+  await expect(page.locator('[data-flow-certainty="resolved"]')).toContainText('start');
+  await expect(page.locator('[data-flow-certainty="resolved"] .flowMarker--resolved')).toBeVisible();
+  await expect(page.locator('[data-flow-certainty="uncertain"]')).toContainText('finish');
+  await expect(page.locator('[data-flow-certainty="uncertain"] .flowMarker--uncertain')).toBeVisible();
+  await expect(page.locator('[data-flow-certainty="uncertain"]')).toHaveCSS('border-left-style', 'dashed');
+
   await expect(page.locator('[data-dispatch="dynamic"]')).toContainText('this.finish');
   await expect(page.locator('[data-dispatch="dynamic"]')).toContainText('dynamic dispatch');
   await expect(page.locator('[data-dispatch="unknown"]')).toContainText('client.run');
