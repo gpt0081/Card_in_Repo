@@ -1,6 +1,6 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import RepositoryMap from './RepositoryMap';
 import type { Feature } from './api';
 
@@ -30,5 +30,13 @@ describe('RepositoryMap',()=>{
     expect(html).toContain('client.run');
     expect(html).toContain('target unknown');
     expect(html).toContain('data-dispatch="unknown"');
+  });
+
+  it('exposes flow steps as file-structure navigation when a selection handler is provided',()=>{
+    const onSelectStep=vi.fn();
+    const html=renderToStaticMarkup(<RepositoryMap features={features} onSelectStep={onSelectStep}/>);
+    expect(html).toContain('aria-label="Open checkout in file structure"');
+    expect(html).toContain('aria-label="Open finish in file structure"');
+    expect(html).toContain('class="flowStepSelect"');
   });
 });
