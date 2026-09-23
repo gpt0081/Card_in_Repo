@@ -18,7 +18,7 @@ export default function FlowCardScope({ cards, selectedSymbolId, children }: Pro
   return <>
     {selectedSymbolId && <p className="flowCardContext" data-flow-scoped={result.scoped}>
       {result.scoped
-        ? `${result.cards.length} function card${result.cards.length === 1 ? '' : 's'} follow the selected execution symbol.`
+        ? `${result.cards.length} function card${result.cards.length === 1 ? ' follows' : 's follow'} the selected execution symbol.`
         : 'No exact function card matches the selected execution symbol. Showing all verified cards.'}
     </p>}
     {children(result.cards)}
