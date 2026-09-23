@@ -44,14 +44,32 @@ def _resolve_relative_ecmascript_module(importer: str, module: str, known_paths:
     return candidates[0] if len(candidates) == 1 else None
 
 
+def _resolve_python_import_module(importer: str, module: str) -> str | None:
+    """Turn an explicit Python import module into its repository-qualified module name."""
+    if not module.startswith("."):
+        return module
+    level = len(module) - len(module.lstrip("."))
+    package_parts = importer[:-3].split("/")[:-1]
+    if PurePosixPath(importer).name == "__init__.py":
+        package_parts = importer[:-12].strip("/").split("/") if "/" in importer else []
+    ascend = level - 1
+    if ascend > len(package_parts):
+        return None
+    base = package_parts[: len(package_parts) - ascend] if ascend else package_parts
+    remainder = module[level:]
+    parts = [*base, *([part for part in remainder.split(".") if part] if remainder else [])]
+    return ".".join(parts) if parts else None
+
+
 def analyze_repository(files: dict[str, str]) -> dict[str, Any]:
     """Combine supported source-file facts into one deterministic repository graph.
 
     Cross-file resolution is deliberately narrow. Python resolves explicit
-    ``from module import name`` calls. JavaScript/TypeScript resolves named imports
-    from an unambiguous relative source module (including extensionless and index
-    paths). Package imports, aliases, tsconfig paths and bundler-specific rules remain
-    unresolved rather than being guessed.
+    ``from module import name`` calls, including package-relative imports.
+    JavaScript/TypeScript resolves named imports from an unambiguous relative
+    source module (including extensionless and index paths). Package imports,
+    aliases, tsconfig paths and bundler-specific rules remain unresolved rather
+    than being guessed.
     """
     file_facts: list[dict[str, Any]] = []
     for path in sorted(files):
@@ -95,6 +113,9 @@ def analyze_repository(files: dict[str, str]) -> dict[str, Any]:
                 text = item["text"].strip()
                 if text.startswith("from ") and " import " in text:
                     module, names = text[5:].split(" import ", 1)
+                    resolved_module = _resolve_python_import_module(path, module.strip())
+                    if resolved_module is None:
+                        continue
                     for raw_name in names.split(","):
                         part = raw_name.strip()
                         if not part or part == "*":
@@ -102,7 +123,7 @@ def analyze_repository(files: dict[str, str]) -> dict[str, Any]:
                         bits = part.split(" as ")
                         imported = bits[0].strip()
                         local = bits[-1].strip()
-                        imports_by_file[path][local] = f"{module.strip()}:{imported}"
+                        imports_by_file[path][local] = f"{resolved_module}:{imported}"
             continue
         if facts["file"]["language"] not in {"javascript", "typescript", "tsx"}:
             continue
