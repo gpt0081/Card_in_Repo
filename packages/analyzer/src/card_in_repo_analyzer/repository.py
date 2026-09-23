@@ -16,6 +16,7 @@ DEFAULT_IMPORT_RE = re.compile(r"^import\s+(?P<local>[A-Za-z_$][\w$]*)\s+from\s*
 DEFAULT_NAMED_EXPORT_RE = re.compile(
     r"\bexport\s+default\s+(?:(?:async\s+)?function|class)\s+(?P<name>[A-Za-z_$][\w$]*)\b"
 )
+REEXPORT_RE = re.compile(r"^export\s*\{(?P<names>[^}]*)\}\s*from\s*['\"](?P<module>[^'\"]+)['\"]\s*;?$")
 
 
 def _analyze_file(path: str, source: str) -> dict[str, Any] | None:
@@ -70,11 +71,11 @@ def analyze_repository(files: dict[str, str]) -> dict[str, Any]:
 
     Cross-file resolution is deliberately narrow. Python resolves explicit
     ``from module import name`` calls, including package-relative imports.
-    JavaScript/TypeScript resolves named imports and named default declaration
-    imports from an unambiguous relative source module (including extensionless
-    and index paths). Package imports, anonymous default exports, re-exports,
-    aliases from tsconfig paths and bundler-specific rules remain unresolved
-    rather than being guessed.
+    JavaScript/TypeScript resolves named imports, named default declaration
+    imports, and explicit named re-exports from an unambiguous relative source
+    module (including extensionless and index paths). Package imports, wildcard
+    re-exports, anonymous default exports, tsconfig aliases and bundler-specific
+    rules remain unresolved rather than being guessed.
     """
     file_facts: list[dict[str, Any]] = []
     for path in sorted(files):
@@ -120,6 +121,45 @@ def analyze_repository(files: dict[str, str]) -> dict[str, Any]:
         for facts in file_facts
         if facts["file"]["language"] in {"javascript", "typescript", "tsx"}
     }
+
+    # Record only explicit ``export { x [as y] } from './module'`` bindings.
+    # The value points at the next module/name pair, allowing deterministic barrel
+    # chains to be followed without treating a re-export as a local declaration.
+    reexports: dict[tuple[str, str], tuple[str, str]] = {}
+    for path in sorted(ecmascript_paths):
+        for line in files[path].splitlines():
+            match = REEXPORT_RE.match(line.strip())
+            if match is None:
+                continue
+            target_path = _resolve_relative_ecmascript_module(path, match.group("module"), ecmascript_paths)
+            if target_path is None:
+                continue
+            for raw_name in match.group("names").split(","):
+                part = raw_name.strip()
+                if not part:
+                    continue
+                bits = re.split(r"\s+as\s+", part)
+                imported = bits[0].strip()
+                exported = bits[-1].strip()
+                if imported == "default":
+                    imported = default_exports_by_path.get(target_path, "")
+                if imported.isidentifier() and exported.isidentifier():
+                    reexports[(path, exported)] = (target_path, imported)
+
+    def resolve_js_export(path: str, name: str) -> tuple[str, str] | None:
+        """Follow explicit re-export chains, failing closed on cycles or ambiguity."""
+        seen: set[tuple[str, str]] = set()
+        current = (path, name)
+        while current not in seen:
+            seen.add(current)
+            if len(by_path_name.get(current, [])) == 1:
+                return current
+            next_binding = reexports.get(current)
+            if next_binding is None:
+                return None
+            current = next_binding
+        return None
+
     for facts in file_facts:
         path = facts["file"]["path"]
         if facts["file"]["language"] == "python":
@@ -156,7 +196,9 @@ def analyze_repository(files: dict[str, str]) -> dict[str, Any]:
                     imported = bits[0].strip()
                     local = bits[-1].strip()
                     if imported.isidentifier() and local.isidentifier():
-                        js_imports_by_file[path][local] = (target_path, imported)
+                        resolved = resolve_js_export(target_path, imported)
+                        if resolved is not None:
+                            js_imports_by_file[path][local] = resolved
                 continue
             default_match = DEFAULT_IMPORT_RE.match(text)
             if default_match is None:
@@ -194,7 +236,7 @@ def analyze_repository(files: dict[str, str]) -> dict[str, Any]:
 
     return {
         "schema_version": 1,
-        "analyzer_version": "repository-v0.4.0",
+        "analyzer_version": "repository-v0.5.0",
         "files": [facts["file"] for facts in file_facts],
         "symbols": symbols,
         "calls": calls,

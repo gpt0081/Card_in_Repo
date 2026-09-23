@@ -122,6 +122,40 @@ def test_repository_analysis_does_not_guess_anonymous_default_export():
     assert call["resolved_target_id"] is None
 
 
+def test_repository_analysis_resolves_explicit_named_reexport_chain():
+    facts = analyze_repository({
+        "web/app.ts": "import { load as fetchUser } from './services';\nexport function boot() { return fetchUser(); }\n",
+        "web/services/index.ts": "export { loadUser as load } from './user';\n",
+        "web/services/user.ts": "export function loadUser() { return 1; }\n",
+    })
+    call = next(call for call in facts["calls"] if call["callee"] == "fetchUser")
+    target = next(symbol for symbol in facts["symbols"] if symbol["id"] == call["resolved_target_id"])
+    assert target["name"] == "loadUser"
+    assert facts["symbol_paths"][target["id"]] == "web/services/user.ts"
+    assert call["resolution"] == "repository-import"
+
+
+def test_repository_analysis_resolves_default_as_named_reexport():
+    facts = analyze_repository({
+        "web/app.ts": "import { load } from './services';\nexport function boot() { return load(); }\n",
+        "web/services/index.ts": "export { default as load } from './user';\n",
+        "web/services/user.ts": "export default function loadUser() { return 1; }\n",
+    })
+    call = next(call for call in facts["calls"] if call["callee"] == "load")
+    assert call["resolved_target_id"] is not None
+    assert facts["symbol_paths"][call["resolved_target_id"]] == "web/services/user.ts"
+
+
+def test_repository_analysis_does_not_follow_wildcard_reexport():
+    facts = analyze_repository({
+        "web/app.ts": "import { loadUser } from './services';\nexport function boot() { return loadUser(); }\n",
+        "web/services/index.ts": "export * from './user';\n",
+        "web/services/user.ts": "export function loadUser() { return 1; }\n",
+    })
+    call = next(call for call in facts["calls"] if call["callee"] == "loadUser")
+    assert call["resolved_target_id"] is None
+
+
 def test_repository_analysis_does_not_guess_package_or_ambiguous_extension_imports():
     facts = analyze_repository({
         "web/app.ts": "import { load } from 'pkg';\nimport { render } from './view';\nexport function boot() { load(); return render(); }\n",
