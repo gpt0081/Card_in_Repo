@@ -101,6 +101,27 @@ def test_repository_analysis_resolves_parent_relative_javascript_index_import():
     assert facts["symbol_paths"][call["resolved_target_id"]] == "web/ui/index.js"
 
 
+def test_repository_analysis_resolves_named_default_typescript_import():
+    facts = analyze_repository({
+        "web/app.ts": "import load from './services/user';\nexport function boot() { return load(); }\n",
+        "web/services/user.ts": "export default function loadUser() { return 1; }\n",
+    })
+    call = next(call for call in facts["calls"] if call["callee"] == "load")
+    target = next(symbol for symbol in facts["symbols"] if symbol["id"] == call["resolved_target_id"])
+    assert target["name"] == "loadUser"
+    assert facts["symbol_paths"][target["id"]] == "web/services/user.ts"
+    assert call["resolution"] == "repository-import"
+
+
+def test_repository_analysis_does_not_guess_anonymous_default_export():
+    facts = analyze_repository({
+        "web/app.ts": "import load from './services/user';\nexport function boot() { return load(); }\n",
+        "web/services/user.ts": "export default () => 1;\n",
+    })
+    call = next(call for call in facts["calls"] if call["callee"] == "load")
+    assert call["resolved_target_id"] is None
+
+
 def test_repository_analysis_does_not_guess_package_or_ambiguous_extension_imports():
     facts = analyze_repository({
         "web/app.ts": "import { load } from 'pkg';\nimport { render } from './view';\nexport function boot() { load(); return render(); }\n",
