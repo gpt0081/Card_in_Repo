@@ -14,6 +14,30 @@ def test_repository_analysis_resolves_explicit_cross_file_import():
     assert call["resolution"] == "repository-import"
 
 
+def test_repository_analysis_resolves_package_relative_imports():
+    facts = analyze_python_repository({
+        "shop/__init__.py": "",
+        "shop/api.py": "from .services.user import load_user\n\ndef run():\n    return load_user()\n",
+        "shop/services/user.py": "def load_user():\n    return {'id': 1}\n",
+    })
+    call = next(call for call in facts["calls"] if call["callee"] == "load_user")
+    assert call["resolved_target_id"] is not None
+    assert facts["symbol_paths"][call["resolved_target_id"]] == "shop/services/user.py"
+    assert call["resolution"] == "repository-import"
+
+
+def test_repository_analysis_resolves_parent_package_relative_imports():
+    facts = analyze_python_repository({
+        "shop/__init__.py": "",
+        "shop/pages/home.py": "from ..services.user import load_user as load\n\ndef home():\n    return load()\n",
+        "shop/services/user.py": "def load_user():\n    return {'id': 1}\n",
+    })
+    call = next(call for call in facts["calls"] if call["callee"] == "load")
+    assert call["resolved_target_id"] is not None
+    assert facts["symbol_paths"][call["resolved_target_id"]] == "shop/services/user.py"
+    assert call["resolution"] == "repository-import"
+
+
 def test_repository_analysis_does_not_guess_unimported_same_name():
     facts = analyze_python_repository({
         "app.py": "def run():\n    return load_user()\n",
