@@ -44,6 +44,16 @@ jobs:
           E2E_BASE_URL: http://127.0.0.1:8080
           E2E_SESSION_SECRET: ci-session-secret
         run: npm run test:e2e
+      - name: Retain browser E2E failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-e2e-failure-${{ github.run_id }}
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+          if-no-files-found: warn
+          retention-days: 7
       - name: Show logs on failure
         if: failure()
         run: docker compose -f compose.yml logs --no-color api worker web postgres redis
