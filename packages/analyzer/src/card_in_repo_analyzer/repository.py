@@ -12,6 +12,10 @@ from .python import analyze_python
 
 ECMASCRIPT_SUFFIXES = (".js", ".jsx", ".ts", ".tsx")
 NAMED_IMPORT_RE = re.compile(r"^import\s*\{(?P<names>[^}]*)\}\s*from\s*['\"](?P<module>[^'\"]+)['\"]\s*;?$")
+DEFAULT_IMPORT_RE = re.compile(r"^import\s+(?P<local>[A-Za-z_$][\w$]*)\s+from\s*['\"](?P<module>[^'\"]+)['\"]\s*;?$")
+DEFAULT_NAMED_EXPORT_RE = re.compile(
+    r"\bexport\s+default\s+(?:(?:async\s+)?function|class)\s+(?P<name>[A-Za-z_$][\w$]*)\b"
+)
 
 
 def _analyze_file(path: str, source: str) -> dict[str, Any] | None:
@@ -66,10 +70,11 @@ def analyze_repository(files: dict[str, str]) -> dict[str, Any]:
 
     Cross-file resolution is deliberately narrow. Python resolves explicit
     ``from module import name`` calls, including package-relative imports.
-    JavaScript/TypeScript resolves named imports from an unambiguous relative
-    source module (including extensionless and index paths). Package imports,
-    aliases, tsconfig paths and bundler-specific rules remain unresolved rather
-    than being guessed.
+    JavaScript/TypeScript resolves named imports and named default declaration
+    imports from an unambiguous relative source module (including extensionless
+    and index paths). Package imports, anonymous default exports, re-exports,
+    aliases from tsconfig paths and bundler-specific rules remain unresolved
+    rather than being guessed.
     """
     file_facts: list[dict[str, Any]] = []
     for path in sorted(files):
@@ -98,6 +103,15 @@ def analyze_repository(files: dict[str, str]) -> dict[str, Any]:
         for symbol in facts["symbols"]:
             if symbol["parent_symbol_id"] is None:
                 by_module_name[(module, symbol["name"])].append(symbol["id"])
+
+    default_exports_by_path: dict[str, str] = {}
+    for facts in file_facts:
+        path = facts["file"]["path"]
+        if facts["file"]["language"] not in {"javascript", "typescript", "tsx"}:
+            continue
+        match = DEFAULT_NAMED_EXPORT_RE.search(files[path])
+        if match is not None and len(by_path_name.get((path, match.group("name")), [])) == 1:
+            default_exports_by_path[path] = match.group("name")
 
     imports_by_file: dict[str, dict[str, str]] = defaultdict(dict)
     js_imports_by_file: dict[str, dict[str, tuple[str, str]]] = defaultdict(dict)
@@ -128,21 +142,31 @@ def analyze_repository(files: dict[str, str]) -> dict[str, Any]:
         if facts["file"]["language"] not in {"javascript", "typescript", "tsx"}:
             continue
         for item in facts["imports"]:
-            match = NAMED_IMPORT_RE.match(item["text"].strip())
-            if match is None:
+            text = item["text"].strip()
+            match = NAMED_IMPORT_RE.match(text)
+            if match is not None:
+                target_path = _resolve_relative_ecmascript_module(path, match.group("module"), ecmascript_paths)
+                if target_path is None:
+                    continue
+                for raw_name in match.group("names").split(","):
+                    part = raw_name.strip()
+                    if not part:
+                        continue
+                    bits = re.split(r"\s+as\s+", part)
+                    imported = bits[0].strip()
+                    local = bits[-1].strip()
+                    if imported.isidentifier() and local.isidentifier():
+                        js_imports_by_file[path][local] = (target_path, imported)
                 continue
-            target_path = _resolve_relative_ecmascript_module(path, match.group("module"), ecmascript_paths)
+            default_match = DEFAULT_IMPORT_RE.match(text)
+            if default_match is None:
+                continue
+            target_path = _resolve_relative_ecmascript_module(path, default_match.group("module"), ecmascript_paths)
             if target_path is None:
                 continue
-            for raw_name in match.group("names").split(","):
-                part = raw_name.strip()
-                if not part:
-                    continue
-                bits = re.split(r"\s+as\s+", part)
-                imported = bits[0].strip()
-                local = bits[-1].strip()
-                if imported.isidentifier() and local.isidentifier():
-                    js_imports_by_file[path][local] = (target_path, imported)
+            exported_name = default_exports_by_path.get(target_path)
+            if exported_name is not None:
+                js_imports_by_file[path][default_match.group("local")] = (target_path, exported_name)
 
     python_paths = {facts["file"]["path"] for facts in file_facts if facts["file"]["language"] == "python"}
     for call in calls:
@@ -170,7 +194,7 @@ def analyze_repository(files: dict[str, str]) -> dict[str, Any]:
 
     return {
         "schema_version": 1,
-        "analyzer_version": "repository-v0.3.0",
+        "analyzer_version": "repository-v0.4.0",
         "files": [facts["file"] for facts in file_facts],
         "symbols": symbols,
         "calls": calls,
