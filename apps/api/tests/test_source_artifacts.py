@@ -1,6 +1,9 @@
 import gzip
 import hashlib
+import io
 import json
+
+import pytest
 
 from card_in_repo_api.source_artifacts import SourceArtifactStore
 
@@ -24,6 +27,10 @@ class FakeS3:
     def put_object(self, **kwargs):
         self.objects.append(kwargs)
         return {}
+
+    def get_object(self, *, Bucket, Key):
+        saved = next(item for item in self.objects if item["Bucket"] == Bucket and item["Key"] == Key)
+        return {"Body": io.BytesIO(saved["Body"])}
 
 
 def test_source_snapshot_is_commit_pinned_deterministic_and_self_describing():
@@ -68,3 +75,34 @@ def test_repeated_snapshot_reuses_bucket_and_produces_identical_content_address(
     assert first.key == second.key
     assert first.sha256 == second.sha256
     assert client.objects[0]["Body"] == client.objects[1]["Body"]
+
+
+def test_source_range_is_reconstructed_from_verified_commit_snapshot():
+    client = FakeS3()
+    store = SourceArtifactStore(client, "sources")
+    commit = "c" * 40
+    artifact = store.put_snapshot(
+        "owner/repo",
+        commit,
+        {"src/main.ts": "line one\nline two\nline three\nline four\n"},
+    )
+
+    assert store.get_source_range(
+        "owner/repo",
+        commit,
+        "src/main.ts",
+        2,
+        3,
+        expected_sha256=artifact.sha256,
+    ) == "line two\nline three\n"
+
+
+def test_snapshot_reader_rejects_tampered_artifact():
+    client = FakeS3()
+    store = SourceArtifactStore(client, "sources")
+    commit = "d" * 40
+    artifact = store.put_snapshot("owner/repo", commit, {"main.py": "print('safe')\n"})
+    client.objects[0]["Body"] += b"tampered"
+
+    with pytest.raises(RuntimeError, match="sha256 mismatch"):
+        store.get_snapshot("owner/repo", commit, expected_sha256=artifact.sha256)
