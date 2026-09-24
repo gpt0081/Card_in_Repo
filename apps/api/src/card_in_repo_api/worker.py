@@ -9,6 +9,7 @@ from .github_source import GitHubSourceError, resolve_github_repository
 from .jobs import AnalysisJobQueue
 from .outbox import dispatch_one
 from .runtime import build_analysis_queue
+from .source_artifacts import SourceArtifactStore, build_source_artifact_store
 
 
 def _max_attempts() -> int:
@@ -18,7 +19,11 @@ def _max_attempts() -> int:
     return value
 
 
-def run_one(queue: AnalysisJobQueue | None = None, timeout_seconds: int = 5) -> bool:
+def run_one(
+    queue: AnalysisJobQueue | None = None,
+    timeout_seconds: int = 5,
+    source_artifacts: SourceArtifactStore | None = None,
+) -> bool:
     queue = queue or build_analysis_queue()
     delivery = queue.claim(timeout_seconds)
     if delivery is None:
@@ -45,7 +50,10 @@ def run_one(queue: AnalysisJobQueue | None = None, timeout_seconds: int = 5) -> 
     try:
         snapshot = resolve_github_repository(job.repository_url, job.ref)
         _STORE.put_analysis({**current, "state": "PARSING", "repository": snapshot.repository, "commit_sha": snapshot.commit_sha})
+        artifact = source_artifacts.put_snapshot(snapshot.repository, snapshot.commit_sha, snapshot.files) if source_artifacts else None
         facts = analyze_repository(snapshot.files)
+        if artifact is not None:
+            facts = {**facts, "source_artifact": artifact.as_fact()}
         store_completed_analysis(
             snapshot.repository,
             snapshot.commit_sha,
@@ -74,10 +82,11 @@ def run_one(queue: AnalysisJobQueue | None = None, timeout_seconds: int = 5) -> 
 
 def main() -> None:
     queue = build_analysis_queue()
+    source_artifacts = build_source_artifact_store()
     while True:
         if dispatch_one(_STORE, queue):
             continue
-        run_one(queue, timeout_seconds=5)
+        run_one(queue, timeout_seconds=5, source_artifacts=source_artifacts)
 
 
 if __name__ == "__main__":

@@ -26,13 +26,14 @@ jobs:
         run: docker compose -f compose.yml build api worker web
       - name: Start persistent product path
         run: docker compose -f compose.yml up -d --wait postgres redis api worker web
-      - name: Verify API, worker, PWA, and browser-facing proxy
+      - name: Verify API, worker, PWA, object storage, and browser-facing proxy
         run: |
           curl --fail --retry 5 --retry-delay 2 http://localhost:8000/health
           curl --fail --retry 5 --retry-delay 2 http://localhost:8080/ | grep -q 'Card in Repo'
           curl --fail --retry 5 --retry-delay 2 http://localhost:8080/api-health
           test "$(docker compose -f compose.yml ps --status running --services worker)" = "worker"
           test "$(docker compose -f compose.yml ps --status running --services web)" = "web"
+          test "$(docker compose -f compose.yml ps --status running --services object-storage)" = "object-storage"
       - name: Install browser E2E dependencies
         working-directory: apps/web
         run: |
@@ -44,6 +45,28 @@ jobs:
           E2E_BASE_URL: http://127.0.0.1:8080
           E2E_SESSION_SECRET: ci-session-secret
         run: npm run test:e2e
+      - name: Verify analyzed repositories produced durable source artifacts
+        run: |
+          docker compose -f compose.yml exec -T worker python - <<'PY'
+          import boto3, gzip, json, os
+          client = boto3.client(
+              "s3",
+              endpoint_url=os.environ["S3_ENDPOINT_URL"],
+              aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+              aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+              region_name=os.environ["AWS_REGION"],
+          )
+          bucket = os.environ["CARD_IN_REPO_SOURCE_BUCKET"]
+          objects = client.list_objects_v2(Bucket=bucket).get("Contents", [])
+          assert objects, "browser analyses produced no source artifacts"
+          for item in objects:
+              saved = client.get_object(Bucket=bucket, Key=item["Key"])
+              payload = json.loads(gzip.decompress(saved["Body"].read()))
+              assert payload["format"] == "card-in-repo-source-snapshot-v1"
+              assert len(payload["commit_sha"]) == 40
+              assert payload["files"], item["Key"]
+          print(f"verified {len(objects)} durable source artifact(s)")
+          PY
       - name: Retain browser E2E failure evidence
         if: failure()
         uses: actions/upload-artifact@v4
@@ -56,7 +79,7 @@ jobs:
           retention-days: 7
       - name: Show logs on failure
         if: failure()
-        run: docker compose -f compose.yml logs --no-color api worker web postgres redis
+        run: docker compose -f compose.yml logs --no-color api worker web object-storage postgres redis
       - name: Stop runtime
         if: always()
         run: docker compose -f compose.yml down -v
