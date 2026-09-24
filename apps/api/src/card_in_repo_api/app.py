@@ -54,10 +54,11 @@ def health() -> dict[str, str]:
 
 
 def store_completed_analysis(repository: str, commit_sha: str, files: dict[str, str], facts: dict[str, Any], analysis_id: str | None = None, expected_delivery_id: str | None = None) -> dict[str, Any]:
-    # Persist the path relation as part of the fact layer. Single-file analyzers from
-    # early slices did not emit symbol_paths, but downstream Files/Concepts views must
-    # never depend on an ephemeral fallback used only while cards are being built.
+    # Persist source membership as a fact independently from symbols. Barrel/config/module
+    # files can be meaningful parts of repository structure while declaring no function or
+    # class symbol of their own, so Files must not silently erase them.
     facts = dict(facts)
+    facts["source_paths"] = sorted(files)
     symbols_list = facts.get("symbols", [])
     symbol_paths = dict(facts.get("symbol_paths") or {})
     if len(files) == 1:
@@ -191,7 +192,7 @@ def get_files(analysis_id: str) -> dict[str, Any]:
     facts = analysis.get("facts") or {}
     symbols = facts.get("symbols") or []
     symbol_paths = facts.get("symbol_paths") or {}
-    grouped: dict[str, list[dict[str, Any]]] = {}
+    grouped: dict[str, list[dict[str, Any]]] = {path: [] for path in (facts.get("source_paths") or [])}
     for symbol in symbols:
         path = symbol_paths.get(symbol.get("id"))
         if not path:

@@ -14,6 +14,7 @@ from .python import analyze_python
 ECMASCRIPT_SUFFIXES = (".js", ".jsx", ".ts", ".tsx")
 NAMED_IMPORT_RE = re.compile(r"^import\s*\{(?P<names>[^}]*)\}\s*from\s*['\"](?P<module>[^'\"]+)['\"]\s*;?$")
 DEFAULT_IMPORT_RE = re.compile(r"^import\s+(?P<local>[A-Za-z_$][\w$]*)\s+from\s*['\"](?P<module>[^'\"]+)['\"]\s*;?$")
+NAMESPACE_IMPORT_RE = re.compile(r"^import\s*\*\s*as\s*(?P<local>[A-Za-z_$][\w$]*)\s*from\s*['\"](?P<module>[^'\"]+)['\"]\s*;?$")
 DEFAULT_NAMED_EXPORT_RE = re.compile(r"\bexport\s+default\s+(?:(?:async\s+)?function|class)\s+(?P<name>[A-Za-z_$][\w$]*)\b")
 REEXPORT_RE = re.compile(r"^export\s*\{(?P<names>[^}]*)\}\s*from\s*['\"](?P<module>[^'\"]+)['\"]\s*;?$")
 
@@ -45,7 +46,6 @@ def _resolve_ecmascript_candidate(normalized: str, known_paths: set[str]) -> str
 
 
 def _resolve_relative_ecmascript_module(importer: str, module: str, known_paths: set[str]) -> str | None:
-    """Resolve only unambiguous relative source modules, without emulating a bundler."""
     if not module.startswith("."):
         return None
     normalized = posixpath.normpath(posixpath.join(posixpath.dirname(importer), module))
@@ -53,7 +53,6 @@ def _resolve_relative_ecmascript_module(importer: str, module: str, known_paths:
 
 
 def _load_tsconfig_paths(files: dict[str, str]) -> dict[str, tuple[str, dict[str, list[str]]]]:
-    """Read only explicit, parseable baseUrl + paths contracts from repository tsconfigs."""
     configs: dict[str, tuple[str, dict[str, list[str]]]] = {}
     for path, source in files.items():
         if PurePosixPath(path).name != "tsconfig.json":
@@ -95,7 +94,6 @@ def _nearest_tsconfig(importer: str, configs: dict[str, tuple[str, dict[str, lis
 
 
 def _resolve_tsconfig_ecmascript_module(importer: str, module: str, known_paths: set[str], configs: dict[str, tuple[str, dict[str, list[str]]]]) -> str | None:
-    """Resolve a single explicit tsconfig paths mapping; ambiguity always fails closed."""
     if module.startswith("."):
         return None
     config = _nearest_tsconfig(importer, configs)
@@ -142,7 +140,6 @@ def _resolve_python_import_module(importer: str, module: str) -> str | None:
 
 
 def analyze_repository(files: dict[str, str]) -> dict[str, Any]:
-    """Combine supported source-file facts into one deterministic repository graph."""
     file_facts = [facts for path in sorted(files) if (facts := _analyze_file(path, files[path])) is not None]
     symbols = [symbol for facts in file_facts for symbol in facts["symbols"]]
     calls = [dict(call, path=facts["file"]["path"]) for facts in file_facts for call in facts["calls"]]
@@ -175,6 +172,7 @@ def analyze_repository(files: dict[str, str]) -> dict[str, Any]:
 
     imports_by_file: dict[str, dict[str, str]] = defaultdict(dict)
     js_imports_by_file: dict[str, dict[str, tuple[str, str]]] = defaultdict(dict)
+    js_namespace_imports_by_file: dict[str, dict[str, str]] = defaultdict(dict)
     ecmascript_paths = {facts["file"]["path"] for facts in file_facts if facts["file"]["language"] in {"javascript", "typescript", "tsx"}}
     tsconfig_paths = _load_tsconfig_paths(files)
 
@@ -235,6 +233,12 @@ def analyze_repository(files: dict[str, str]) -> dict[str, Any]:
             continue
         for item in facts["imports"]:
             text = item["text"].strip()
+            namespace_match = NAMESPACE_IMPORT_RE.match(text)
+            if namespace_match is not None:
+                target_path = resolve_module(path, namespace_match.group("module"))
+                if target_path is not None:
+                    js_namespace_imports_by_file[path][namespace_match.group("local")] = target_path
+                continue
             match = NAMED_IMPORT_RE.match(text)
             if match is not None:
                 target_path = resolve_module(path, match.group("module"))
@@ -261,20 +265,33 @@ def analyze_repository(files: dict[str, str]) -> dict[str, Any]:
 
     python_paths = {facts["file"]["path"] for facts in file_facts if facts["file"]["language"] == "python"}
     for call in calls:
-        if call.get("resolved_target_id") is not None or not call["callee"].isidentifier():
+        if call.get("resolved_target_id") is not None:
             continue
-        if call["path"] in python_paths:
+        matches: list[str] = []
+        if call["path"] in python_paths and call["callee"].isidentifier():
             imported = imports_by_file[call["path"]].get(call["callee"])
             if not imported:
                 continue
             module, name = imported.split(":", 1)
             matches = by_module_name.get((module, name), [])
         elif call["path"] in ecmascript_paths:
-            imported = js_imports_by_file[call["path"]].get(call["callee"])
-            if not imported:
+            if call["callee"].isidentifier():
+                imported = js_imports_by_file[call["path"]].get(call["callee"])
+                if not imported:
+                    continue
+                target_path, name = imported
+                matches = by_path_name.get((target_path, name), [])
+            elif call.get("callee_kind") == "member" and isinstance(call.get("receiver"), str) and call["receiver"].isidentifier() and isinstance(call.get("member_name"), str) and call["member_name"].isidentifier():
+                target_path = js_namespace_imports_by_file[call["path"]].get(call["receiver"])
+                if target_path is None:
+                    continue
+                resolved = resolve_js_export(target_path, call["member_name"])
+                if resolved is None:
+                    continue
+                resolved_path, name = resolved
+                matches = by_path_name.get((resolved_path, name), [])
+            else:
                 continue
-            target_path, name = imported
-            matches = by_path_name.get((target_path, name), [])
         else:
             continue
         if len(matches) == 1:
@@ -283,7 +300,7 @@ def analyze_repository(files: dict[str, str]) -> dict[str, Any]:
         elif len(matches) > 1:
             warnings.append({"code": "AMBIGUOUS_REPOSITORY_CALL_TARGET", "path": call["path"], "callee": call["callee"], "candidate_target_ids": matches})
 
-    return {"schema_version": 1, "analyzer_version": "repository-v0.6.0", "files": [facts["file"] for facts in file_facts], "symbols": symbols, "calls": calls, "warnings": warnings, "symbol_paths": symbol_path}
+    return {"schema_version": 1, "analyzer_version": "repository-v0.7.0", "files": [facts["file"] for facts in file_facts], "symbols": symbols, "calls": calls, "warnings": warnings, "symbol_paths": symbol_path}
 
 
 def analyze_python_repository(files: dict[str, str]) -> dict[str, Any]:

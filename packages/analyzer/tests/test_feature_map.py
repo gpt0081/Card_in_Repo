@@ -38,6 +38,7 @@ def test_cross_file_typescript_flow_preserves_repository_paths():
         ("loadUser", "src/services/user.ts"),
         ("normalize", "src/services/user.ts"),
     ]
+    assert [step.get("relation") for step in entry["flow_steps"]] == [None, "calls", "calls"]
     assert entry["provenance"] == "deterministic-resolved-call-graph"
 
 
