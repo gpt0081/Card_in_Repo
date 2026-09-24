@@ -13,7 +13,7 @@ function signedSession(secret: string) {
   return `${encoded}.${signature}`;
 }
 
-test('authenticated concept mastery persists across a real browser reload', async ({ page, context }) => {
+test('authenticated mastery persists and drives the next-concept recommendation', async ({ page, context }) => {
   test.setTimeout(120_000);
   const baseUrl = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:8080';
   const secret = process.env.E2E_SESSION_SECRET;
@@ -42,13 +42,35 @@ test('authenticated concept mastery persists across a real browser reload', asyn
 
   const progress = page.getByRole('region', { name: 'Concept learning progress' });
   await expect(progress).toBeVisible();
-  const row = progress.locator('.learningRow').first();
-  const conceptId = await row.getAttribute('data-concept-id');
-  expect(conceptId).toBeTruthy();
+  const recommendation = progress.getByRole('complementary', { name: 'Recommended next concept' });
+  await expect(recommendation).toBeVisible();
+  await expect(recommendation.getByRole('button', { name: 'Go to concept' })).toBeVisible();
 
+  const initialNext = await page.evaluate(async analysisId => {
+    const response = await fetch(`/v1/learning/analyses/${encodeURIComponent(analysisId)}/next`, { credentials: 'include' });
+    if (!response.ok) throw new Error(`next concept HTTP ${response.status}`);
+    return (await response.json()).recommendation;
+  }, analysisId!);
+  expect(initialNext?.concept?.id).toBeTruthy();
+  expect(initialNext?.reason).toBe('execution_flow');
+
+  const row = progress.locator(`[data-concept-id="${initialNext.concept.id}"]`);
+  await expect(row).toBeVisible();
   await row.getByRole('button', { name: 'Understood' }).click();
   await expect(row.getByRole('button', { name: 'Understood' })).toHaveAttribute('aria-pressed', 'true');
   await expect(row.locator('small')).toHaveText('understood');
+
+  const nextAfterMastery = await page.evaluate(async analysisId => {
+    const response = await fetch(`/v1/learning/analyses/${encodeURIComponent(analysisId)}/next`, { credentials: 'include' });
+    if (!response.ok) throw new Error(`next concept HTTP ${response.status}`);
+    return (await response.json()).recommendation;
+  }, analysisId!);
+  if (nextAfterMastery) {
+    expect(nextAfterMastery.concept.id).not.toBe(initialNext.concept.id);
+    await expect(recommendation.getByText(`Next · ${nextAfterMastery.concept.name}`)).toBeVisible();
+  } else {
+    await expect(progress.getByText('All discovered concepts are understood.')).toBeVisible();
+  }
 
   await page.reload();
   await expect(page.getByLabel('GitHub account').getByText('@ci-learner')).toBeVisible();
@@ -57,7 +79,7 @@ test('authenticated concept mastery persists across a real browser reload', asyn
 
   const restoredProgress = page.getByRole('region', { name: 'Concept learning progress' });
   await expect(restoredProgress).toBeVisible();
-  const restoredRow = restoredProgress.locator(`[data-concept-id="${conceptId}"]`);
+  const restoredRow = restoredProgress.locator(`[data-concept-id="${initialNext.concept.id}"]`);
   await expect(restoredRow.getByRole('button', { name: 'Understood' })).toHaveAttribute('aria-pressed', 'true');
   await expect(restoredRow.locator('small')).toHaveText('understood');
 
@@ -66,7 +88,7 @@ test('authenticated concept mastery persists across a real browser reload', asyn
     if (!response.ok) throw new Error(`learning state HTTP ${response.status}`);
     const body = await response.json();
     return body.states.find((state: { concept_id: string }) => state.concept_id === conceptId);
-  }, { analysisId: analysisId!, conceptId: conceptId! });
+  }, { analysisId: analysisId!, conceptId: initialNext.concept.id });
 
   expect(persisted?.mastery).toBe('understood');
   expect(persisted?.github_user_id).toBe(424242);
