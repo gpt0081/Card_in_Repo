@@ -4,6 +4,7 @@ import os
 
 import psycopg
 
+from .concept_index import ConceptIndex, PgvectorConceptIndex
 from .jobs import AnalysisJobQueue, MemoryAnalysisJobQueue, RedisAnalysisJobQueue
 from .postgres_store import PostgresAnalysisStore
 from .store import AnalysisStore, MemoryAnalysisStore
@@ -16,14 +17,7 @@ class RuntimeConfigurationError(RuntimeError):
 
 
 def _initialize_postgres_store(store: PostgresAnalysisStore) -> None:
-    """Tolerate the one startup race where API and worker bootstrap schema together.
-
-    PostgreSQL's CREATE TABLE IF NOT EXISTS can still raise UniqueViolation when
-    two transactions create the same relation concurrently. The conflicting
-    transaction has resolved before PostgreSQL reports that violation, so one
-    clean retry observes the schema created by the winner. Other database
-    failures remain fatal rather than being hidden behind startup retries.
-    """
+    """Tolerate the one startup race where API and worker bootstrap schema together."""
     try:
         store.initialize()
     except psycopg.errors.UniqueViolation:
@@ -43,6 +37,18 @@ def build_analysis_store(env: dict[str, str] | None = None) -> AnalysisStore:
         _initialize_postgres_store(store)
         return store
     raise RuntimeConfigurationError(f"unsupported CARD_IN_REPO_STORE={backend!r}; expected 'memory' or 'postgres'")
+
+
+def build_concept_index(env: dict[str, str] | None = None) -> ConceptIndex | None:
+    values = os.environ if env is None else env
+    if values.get("CARD_IN_REPO_STORE", "memory").strip().lower() != "postgres":
+        return None
+    database_url = values.get("DATABASE_URL", "").strip()
+    if not database_url:
+        raise RuntimeConfigurationError("DATABASE_URL is required for pgvector concept retrieval")
+    index = PgvectorConceptIndex(database_url)
+    index.initialize()
+    return index
 
 
 def build_analysis_queue(env: dict[str, str] | None = None) -> AnalysisJobQueue:

@@ -10,7 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        # pgvector/pgvector is the upstream pgvector image (PostgreSQL License).
+        # Retrieval integration tests execute CREATE EXTENSION vector, so CI must
+        # exercise the same database capability required by the product runtime.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: card_in_repo
           POSTGRES_PASSWORD: card_in_repo
