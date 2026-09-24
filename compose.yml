@@ -23,18 +23,19 @@ services:
       timeout: 3s
       retries: 10
   object-storage:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    command: server /data --console-address ":9001"
+    image: chrislusf/seaweedfs:4.47
+    command: ["mini", "-dir=/data"]
     environment:
-      MINIO_ROOT_USER: card_in_repo
-      MINIO_ROOT_PASSWORD: card_in_repo_dev_only
-    ports: ["9000:9000", "9001:9001"]
+      AWS_ACCESS_KEY_ID: card_in_repo
+      AWS_SECRET_ACCESS_KEY: card_in_repo_dev_only
+      S3_BUCKET: card-in-repo-sources
+    ports: ["9000:8333"]
     volumes: [object-data:/data]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "curl", "--fail", "http://localhost:9333/cluster/status"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
   api:
     build:
       context: .
@@ -74,7 +75,7 @@ services:
       CARD_IN_REPO_GITHUB_TOKEN: ${CARD_IN_REPO_GITHUB_TOKEN:-}
       CARD_IN_REPO_SOURCE_ARTIFACTS: s3
       CARD_IN_REPO_SOURCE_BUCKET: card-in-repo-sources
-      S3_ENDPOINT_URL: http://object-storage:9000
+      S3_ENDPOINT_URL: http://object-storage:8333
       AWS_ACCESS_KEY_ID: card_in_repo
       AWS_SECRET_ACCESS_KEY: card_in_repo_dev_only
       AWS_REGION: us-east-1
