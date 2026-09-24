@@ -78,6 +78,58 @@ class SourceArtifactStore:
         )
         return SourceArtifact(self.bucket, key, digest, len(body))
 
+    def get_snapshot(
+        self,
+        repository: str,
+        commit_sha: str,
+        *,
+        expected_sha256: str | None = None,
+    ) -> dict[str, Any]:
+        key = self.object_key(repository, commit_sha)
+        response = self.client.get_object(Bucket=self.bucket, Key=key)
+        stream = response["Body"]
+        body = stream.read() if hasattr(stream, "read") else stream
+        if not isinstance(body, (bytes, bytearray)):
+            raise RuntimeError("source snapshot body must be bytes")
+        body = bytes(body)
+        digest = hashlib.sha256(body).hexdigest()
+        if expected_sha256 is not None and digest != expected_sha256:
+            raise RuntimeError("source snapshot sha256 mismatch")
+        try:
+            payload = json.loads(gzip.decompress(body))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise RuntimeError("invalid source snapshot payload") from exc
+        if payload.get("format") != "card-in-repo-source-snapshot-v1":
+            raise RuntimeError("unsupported source snapshot format")
+        if payload.get("repository") != repository or payload.get("commit_sha") != commit_sha:
+            raise RuntimeError("source snapshot identity mismatch")
+        files = payload.get("files")
+        if not isinstance(files, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in files.items()):
+            raise RuntimeError("invalid source snapshot files")
+        return payload
+
+    def get_source_range(
+        self,
+        repository: str,
+        commit_sha: str,
+        path: str,
+        start_line: int,
+        end_line: int,
+        *,
+        expected_sha256: str | None = None,
+    ) -> str:
+        if start_line < 1 or end_line < start_line:
+            raise ValueError("invalid source range")
+        snapshot = self.get_snapshot(repository, commit_sha, expected_sha256=expected_sha256)
+        try:
+            source = snapshot["files"][path]
+        except KeyError as exc:
+            raise KeyError(f"source path not found in snapshot: {path}") from exc
+        lines = source.splitlines(keepends=True)
+        if start_line > len(lines):
+            raise ValueError("source range starts beyond end of file")
+        return "".join(lines[start_line - 1 : end_line])
+
 
 def build_source_artifact_store() -> SourceArtifactStore | None:
     backend = os.getenv("CARD_IN_REPO_SOURCE_ARTIFACTS", "none").strip().lower()
