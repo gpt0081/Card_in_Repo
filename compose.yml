@@ -72,9 +72,16 @@ services:
       CARD_IN_REPO_QUEUE: redis
       REDIS_URL: redis://redis:6379/0
       CARD_IN_REPO_GITHUB_TOKEN: ${CARD_IN_REPO_GITHUB_TOKEN:-}
+      CARD_IN_REPO_SOURCE_ARTIFACTS: s3
+      CARD_IN_REPO_SOURCE_BUCKET: card-in-repo-sources
+      S3_ENDPOINT_URL: http://object-storage:9000
+      AWS_ACCESS_KEY_ID: card_in_repo
+      AWS_SECRET_ACCESS_KEY: card_in_repo_dev_only
+      AWS_REGION: us-east-1
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
+      object-storage: {condition: service_healthy}
   web:
     build:
       context: .
