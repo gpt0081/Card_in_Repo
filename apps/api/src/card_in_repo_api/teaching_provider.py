@@ -28,6 +28,29 @@ class DeterministicTestTeachingProvider:
         }
 
 
+def _decode_message_content(content: Any) -> dict[str, Any]:
+    """Accept common OpenAI-compatible JSON message shapes, but never prose fallback."""
+    if isinstance(content, dict):
+        result = content
+    elif isinstance(content, str):
+        result = json.loads(content)
+    elif isinstance(content, list):
+        text_parts = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") in {"text", "output_text"} and isinstance(part.get("text"), str):
+                text_parts.append(part["text"])
+        if not text_parts:
+            raise TeachingProviderError("teaching provider returned no JSON message content")
+        result = json.loads("".join(text_parts))
+    else:
+        raise TeachingProviderError("teaching provider returned unsupported message content")
+    if not isinstance(result, dict):
+        raise TeachingProviderError("teaching provider response must be a JSON object")
+    return result
+
+
 @dataclass(frozen=True)
 class JsonHttpTeachingProvider:
     """OpenAI-compatible JSON chat adapter limited to teaching prose."""
@@ -76,9 +99,9 @@ class JsonHttpTeachingProvider:
         try:
             with self.opener(request, timeout=self.timeout_seconds) as response:
                 body = json.loads(response.read().decode())
-            result = json.loads(body["choices"][0]["message"]["content"])
+            content = body["choices"][0]["message"]["content"]
+            return _decode_message_content(content)
+        except TeachingProviderError:
+            raise
         except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
             raise TeachingProviderError("teaching provider returned an unusable response") from exc
-        if not isinstance(result, dict):
-            raise TeachingProviderError("teaching provider response must be a JSON object")
-        return result
