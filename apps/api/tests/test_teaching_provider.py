@@ -56,6 +56,24 @@ def test_json_http_provider_sends_only_card_facts_and_returns_structured_prose()
     assert "repository" not in prompt["card_facts"]
 
 
+@pytest.mark.parametrize("content", [
+    {"level": "advanced", "claims": [{"text": "Direct JSON object.", "evidence_ids": ["evidence:1"]}]},
+    [{"type": "text", "text": json.dumps({
+        "level": "advanced",
+        "claims": [{"text": "Typed content block.", "evidence_ids": ["evidence:1"]}],
+    })}],
+])
+def test_provider_accepts_common_openai_compatible_json_content_shapes(content):
+    provider = JsonHttpTeachingProvider(
+        "https://llm.invalid/chat",
+        "model",
+        "secret",
+        opener=lambda request, timeout: Response({"choices": [{"message": {"content": content}}]}),
+    )
+    result = provider.explain_card(card(), "advanced")
+    assert verify_on_demand_card_explanation(card(), result, "advanced")["verified"] is True
+
+
 def test_provider_output_still_fails_closed_on_invented_evidence():
     def opener(request, timeout):
         return Response({"choices": [{"message": {"content": json.dumps({
@@ -71,6 +89,17 @@ def test_provider_output_still_fails_closed_on_invented_evidence():
 def test_malformed_provider_response_is_explicit_failure():
     provider = JsonHttpTeachingProvider(
         "https://llm.invalid/chat", "model", "secret", opener=lambda request, timeout: Response({"choices": []})
+    )
+    with pytest.raises(TeachingProviderError):
+        provider.explain_card(card(), "advanced")
+
+
+def test_non_json_content_never_falls_back_to_unverified_prose():
+    provider = JsonHttpTeachingProvider(
+        "https://llm.invalid/chat",
+        "model",
+        "secret",
+        opener=lambda request, timeout: Response({"choices": [{"message": {"content": "plain prose"}}]}),
     )
     with pytest.raises(TeachingProviderError):
         provider.explain_card(card(), "advanced")
