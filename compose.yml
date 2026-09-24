@@ -45,6 +45,12 @@ services:
       DATABASE_URL: postgresql://card_in_repo:card_in_repo@postgres:5432/card_in_repo
       CARD_IN_REPO_QUEUE: redis
       REDIS_URL: redis://redis:6379/0
+      CARD_IN_REPO_SOURCE_ARTIFACTS: s3
+      CARD_IN_REPO_SOURCE_BUCKET: card-in-repo-sources
+      S3_ENDPOINT_URL: http://object-storage:8333
+      AWS_ACCESS_KEY_ID: card_in_repo
+      AWS_SECRET_ACCESS_KEY: card_in_repo_dev_only
+      AWS_REGION: us-east-1
       CARD_IN_REPO_TEACHING_PROVIDER: ${CARD_IN_REPO_TEACHING_PROVIDER:-none}
       CARD_IN_REPO_ALLOW_TEST_PROVIDER: ${CARD_IN_REPO_ALLOW_TEST_PROVIDER:-0}
       CARD_IN_REPO_GITHUB_CLIENT_ID: ${CARD_IN_REPO_GITHUB_CLIENT_ID:-}
@@ -57,6 +63,7 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
+      object-storage: {condition: service_healthy}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()"]
       interval: 5s
