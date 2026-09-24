@@ -17,6 +17,7 @@ export type AuthUser = { id:number; login:string; avatar_url?:string|null };
 export type AuthSession = { authenticated:boolean; login_available:boolean; user?:AuthUser };
 export type Mastery = 'unknown'|'learning'|'understood';
 export type LearningState = { github_user_id:number; repository:string; concept_id:string; mastery:Mastery; review_due_at?:string|null; updated_at:string };
+export type NextConceptRecommendation = { concept:ConceptCandidate; reason:'review_due'|'structurally_related_to_learning'|'execution_flow'; anchor_concept_id?:string|null; distance?:number|null };
 
 const base = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
@@ -24,9 +25,7 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
   return response.json() as Promise<T>;
 }
-export function submitRepository(repository_url: string) {
-  return json<{id:string;state:string}>('/v1/analyses', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({repository_url})});
-}
+export function submitRepository(repository_url: string) { return json<{id:string;state:string}>('/v1/analyses', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({repository_url})}); }
 export function getAnalysis(id: string) { return json<AnalysisState>(`/v1/analyses/${id}`); }
 export function getFeatures(id: string) { return json<{analysis_id:string;features:Feature[]}>(`/v1/analyses/${id}/features`); }
 export function getFiles(id: string) { return json<{analysis_id:string;files:RepositoryFile[]}>(`/v1/analyses/${id}/files`); }
@@ -35,11 +34,9 @@ export function getCards(id: string) { return json<{analysis_id:string;cards:Lea
 export function getCardTeaching(cardId:string, level:TeachingLevel) { return json<VerifiedTeaching>(`/v1/cards/${encodeURIComponent(cardId)}/teaching?level=${level}`); }
 export function getAuthSession() { return json<AuthSession>('/v1/auth/session'); }
 export function getLearningStates(analysisId:string) { return json<{analysis_id:string;states:LearningState[]}>(`/v1/learning/analyses/${encodeURIComponent(analysisId)}/concepts`); }
+export function getNextConcept(analysisId:string) { return json<{analysis_id:string;recommendation:NextConceptRecommendation|null}>(`/v1/learning/analyses/${encodeURIComponent(analysisId)}/next`); }
 export function updateLearningState(analysisId:string, conceptId:string, mastery:Mastery, review_due_at?:string|null) {
   return json<LearningState>(`/v1/learning/analyses/${encodeURIComponent(analysisId)}/concepts/${encodeURIComponent(conceptId)}`, {method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({mastery,review_due_at:review_due_at??null})});
 }
 export function githubLoginUrl() { return `${base}/v1/auth/github/login`; }
-export async function logout() {
-  const response=await fetch(`${base}/v1/auth/logout`,{method:'POST',credentials:'include',redirect:'follow'});
-  if(!response.ok)throw new Error((await response.text())||`HTTP ${response.status}`);
-}
+export async function logout() { const response=await fetch(`${base}/v1/auth/logout`,{method:'POST',credentials:'include',redirect:'follow'}); if(!response.ok)throw new Error((await response.text())||`HTTP ${response.status}`); }
