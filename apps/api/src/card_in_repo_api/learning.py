@@ -6,6 +6,9 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from .auth import AuthSettings, verify_payload
+from .concept_index import ConceptIndex
+from .concepts import build_concept_candidates
+from .recommendations import recommend_next_concept
 from .store import AnalysisStore
 
 
@@ -27,7 +30,7 @@ def _github_user_id(request: Request, settings: AuthSettings | None) -> int:
         raise HTTPException(status_code=401, detail="GitHub authentication required") from exc
 
 
-def create_learning_router(settings: AuthSettings | None, store: AnalysisStore) -> APIRouter:
+def create_learning_router(settings: AuthSettings | None, store: AnalysisStore, index: ConceptIndex | None = None) -> APIRouter:
     router = APIRouter(prefix="/v1/learning", tags=["learning"])
 
     @router.get("/analyses/{analysis_id}/concepts")
@@ -38,6 +41,22 @@ def create_learning_router(settings: AuthSettings | None, store: AnalysisStore) 
             raise HTTPException(status_code=404, detail="analysis not found")
         repository = str(analysis.get("repository") or "")
         return {"analysis_id": analysis_id, "states": store.get_learning_state(github_user_id, repository)}
+
+    @router.get("/analyses/{analysis_id}/next")
+    def next_concept(analysis_id: str, request: Request) -> dict[str, Any]:
+        github_user_id = _github_user_id(request, settings)
+        if index is None:
+            raise HTTPException(status_code=503, detail="next-concept recommendation requires PostgreSQL pgvector runtime")
+        analysis = store.get_analysis(analysis_id)
+        if analysis is None:
+            raise HTTPException(status_code=404, detail="analysis not found")
+        if analysis.get("state") != "READY":
+            raise HTTPException(status_code=409, detail="next-concept recommendation is available only after repository map is ready")
+        repository = str(analysis.get("repository") or "")
+        concepts = build_concept_candidates(analysis.get("facts") or {}, analysis.get("features") or [])
+        states = store.get_learning_state(github_user_id, repository)
+        recommendation = recommend_next_concept(analysis_id, concepts, states, index)
+        return {"analysis_id": analysis_id, "recommendation": recommendation}
 
     @router.put("/analyses/{analysis_id}/concepts/{concept_id}")
     def update_concept_state(analysis_id: str, concept_id: str, update: LearningStateUpdate, request: Request) -> dict[str, Any]:
