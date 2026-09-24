@@ -14,7 +14,9 @@ def build_feature_map(facts: dict[str, Any]) -> list[dict[str, Any]]:
     Unresolved calls never become graph edges, but statically observed call evidence is
     attached to its source step so downstream teaching/UI layers can explain dynamic or
     unknown dispatch without inventing a target. When the fact layer knows a symbol's
-    repository path, expose it on the flow step too.
+    repository path, expose it on the flow step too. Non-root steps explicitly record
+    the resolved relation that reached them so consumers can distinguish graph edges
+    from mere sequence position.
     """
     symbols_by_id = {symbol["id"]: symbol for symbol in facts["symbols"]}
 
@@ -56,7 +58,7 @@ def build_feature_map(facts: dict[str, Any]) -> list[dict[str, Any]]:
     if not roots and functions:
         roots = [next(iter(functions))]
 
-    def flow_step(symbol_id: str, position: int) -> dict[str, Any]:
+    def flow_step(symbol_id: str, position: int, relation: str | None = None) -> dict[str, Any]:
         symbol = functions[symbol_id]
         step = {
             "position": position,
@@ -64,6 +66,8 @@ def build_feature_map(facts: dict[str, Any]) -> list[dict[str, Any]]:
             "symbol_name": symbol["name"],
             "range": symbol["range"],
         }
+        if relation is not None:
+            step["relation"] = relation
         path = symbol_paths.get(symbol_id)
         if path:
             step["path"] = path
@@ -82,14 +86,14 @@ def build_feature_map(facts: dict[str, Any]) -> list[dict[str, Any]]:
         steps: list[dict[str, Any]] = []
         seen: set[str] = set()
 
-        def walk(symbol_id: str) -> None:
+        def walk(symbol_id: str, relation: str | None = None) -> None:
             if symbol_id in seen:
                 return
             seen.add(symbol_id)
             globally_reached.add(symbol_id)
-            steps.append(flow_step(symbol_id, len(steps) + 1))
+            steps.append(flow_step(symbol_id, len(steps) + 1, relation))
             for target in edges.get(symbol_id, []):
-                walk(target)
+                walk(target, "calls")
 
         walk(root)
         features.append({
