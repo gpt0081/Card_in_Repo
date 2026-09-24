@@ -8,8 +8,10 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from card_in_repo_analyzer import analyze_python, build_feature_map, split_symbol
 from .concepts import build_concept_candidates
+from .evidence import DurableEvidenceError, reconstruct_card_evidence
 from .jobs import AnalysisJob, AnalysisJobQueue
 from .runtime import build_analysis_queue, build_analysis_store, build_teaching_provider
+from .source_artifacts import SourceArtifactStore, build_source_artifact_store
 from .store import AnalysisStore
 from .teaching import TeachingProvider, UnverifiedExplanation, build_card_basic_explanation, verify_on_demand_card_explanation
 from .teaching_provider import TeachingProviderError
@@ -18,6 +20,7 @@ app = FastAPI(title="Card in Repo API", version="0.1.0")
 _STORE: AnalysisStore = build_analysis_store()
 _QUEUE: AnalysisJobQueue = build_analysis_queue()
 _TEACHING_PROVIDER: TeachingProvider | None = build_teaching_provider()
+_SOURCE_ARTIFACTS: SourceArtifactStore | None = build_source_artifact_store()
 
 
 def set_store(store: AnalysisStore) -> None:
@@ -33,6 +36,11 @@ def set_queue(queue: AnalysisJobQueue) -> None:
 def set_teaching_provider(provider: TeachingProvider | None) -> None:
     global _TEACHING_PROVIDER
     _TEACHING_PROVIDER = provider
+
+
+def set_source_artifact_store(store: SourceArtifactStore | None) -> None:
+    global _SOURCE_ARTIFACTS
+    _SOURCE_ARTIFACTS = store
 
 
 class FixtureAnalysisRequest(BaseModel):
@@ -54,9 +62,6 @@ def health() -> dict[str, str]:
 
 
 def store_completed_analysis(repository: str, commit_sha: str, files: dict[str, str], facts: dict[str, Any], analysis_id: str | None = None, expected_delivery_id: str | None = None) -> dict[str, Any]:
-    # Persist source membership as a fact independently from symbols. Barrel/config/module
-    # files can be meaningful parts of repository structure while declaring no function or
-    # class symbol of their own, so Files must not silently erase them.
     facts = dict(facts)
     facts["source_paths"] = sorted(files)
     symbols_list = facts.get("symbols", [])
@@ -226,6 +231,20 @@ def get_analysis_cards(analysis_id: str) -> dict[str, Any]:
         if card is not None:
             cards.append(card)
     return {"analysis_id": analysis_id, "cards": cards}
+
+
+@app.get("/v1/cards/{card_id}/evidence")
+def get_card_evidence(card_id: str) -> dict[str, Any]:
+    card = _STORE.get_card(card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="card not found")
+    if _SOURCE_ARTIFACTS is None:
+        raise HTTPException(status_code=503, detail="durable source artifacts are not configured")
+    try:
+        evidence = reconstruct_card_evidence(_STORE, _SOURCE_ARTIFACTS, card)
+    except DurableEvidenceError as exc:
+        raise HTTPException(status_code=409, detail="card evidence could not be verified") from exc
+    return {"card_id": card_id, "repository": card["repository"], "commit_sha": card["commit_sha"], "evidence": evidence}
 
 
 @app.get("/v1/cards/{card_id}/teaching")
