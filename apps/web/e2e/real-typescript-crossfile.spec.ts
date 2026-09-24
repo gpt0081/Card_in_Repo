@@ -3,6 +3,17 @@ import { expect, test } from '@playwright/test';
 type FlowStep = { symbol_id: string; relation?: string };
 type Feature = { flow_steps: FlowStep[] };
 type RepositoryFile = { path: string; symbols: Array<{ id: string }> };
+type LearningCard = {
+  id: string;
+  path: string;
+  source: string;
+  basic_explanation: { verified: boolean };
+};
+type DurableEvidence = {
+  verified: boolean;
+  path: string;
+  source: string;
+};
 
 const stage = (name: string, details: Record<string, unknown> = {}) => {
   console.log(`[real-ts-crossfile] ${name} ${JSON.stringify(details)}`);
@@ -41,7 +52,7 @@ test('real multi-file TypeScript repository preserves a resolved cross-file exec
 
   const files = ((await filesResponse.json()) as { files: RepositoryFile[] }).files;
   const features = ((await featuresResponse.json()) as { features: Feature[] }).features;
-  const cards = ((await cardsResponse.json()) as { cards: Array<{ path: string; source: string; basic_explanation: { verified: boolean } }> }).cards;
+  const cards = ((await cardsResponse.json()) as { cards: LearningCard[] }).cards;
 
   const tsPaths = files.filter(file => file.path.endsWith('.ts')).map(file => file.path);
   stage('facts:persisted', {
@@ -81,4 +92,23 @@ test('real multi-file TypeScript repository preserves a resolved cross-file exec
   );
   stage('cards:checked', { verified_typescript_cards: verifiedTypeScriptCards.length });
   expect(verifiedTypeScriptCards.length, 'no verified TypeScript Basic card with source evidence was produced').toBeGreaterThan(0);
+
+  const card = verifiedTypeScriptCards[0];
+  const evidenceResponse = await request.get(`${baseUrl}/v1/cards/${card.id}/evidence`);
+  expect(evidenceResponse.ok(), `durable evidence endpoint failed: HTTP ${evidenceResponse.status()}`).toBeTruthy();
+  const evidencePayload = (await evidenceResponse.json()) as {
+    card_id: string;
+    commit_sha: string;
+    evidence: DurableEvidence[];
+  };
+  const verifiedSourceRanges = evidencePayload.evidence.filter(item => item.verified && item.source.length > 0);
+  stage('durable-evidence:checked', {
+    card_id: card.id,
+    commit_sha: evidencePayload.commit_sha,
+    verified_source_ranges: verifiedSourceRanges.length,
+  });
+  expect(evidencePayload.card_id).toBe(card.id);
+  expect(evidencePayload.commit_sha).toHaveLength(40);
+  expect(verifiedSourceRanges.length, 'card has no SHA-verified durable source range').toBeGreaterThan(0);
+  expect(verifiedSourceRanges.some(item => item.path === card.path), 'durable evidence does not match the card source path').toBeTruthy();
 });
