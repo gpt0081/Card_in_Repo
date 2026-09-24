@@ -18,6 +18,8 @@ class AnalysisStore(Protocol):
     def get_card(self, card_id: str) -> dict[str, Any] | None: ...
     def put_learning_state(self, github_user_id: int, repository: str, concept_id: str, mastery: str, review_due_at: str | None = None) -> dict[str, Any]: ...
     def get_learning_state(self, github_user_id: int, repository: str) -> list[dict[str, Any]]: ...
+    def put_concept_vectors(self, analysis_id: str, concepts: list[dict[str, Any]]) -> None: ...
+    def find_similar_concepts(self, analysis_id: str, concept_id: str, limit: int = 5) -> list[dict[str, Any]]: ...
 
 
 class MemoryAnalysisStore:
@@ -27,6 +29,7 @@ class MemoryAnalysisStore:
         self._analyses: dict[str, dict[str, Any]] = {}
         self._cards: dict[str, dict[str, Any]] = {}
         self._learning: dict[tuple[int, str, str], dict[str, Any]] = {}
+        self._concept_vectors: dict[tuple[str, str], dict[str, Any]] = {}
         self._lock = Lock()
 
     def put_analysis(self, analysis: dict[str, Any]) -> None:
@@ -86,14 +89,7 @@ class MemoryAnalysisStore:
     def put_learning_state(self, github_user_id: int, repository: str, concept_id: str, mastery: str, review_due_at: str | None = None) -> dict[str, Any]:
         if mastery not in {"unknown", "learning", "understood"}:
             raise ValueError("invalid mastery")
-        value = {
-            "github_user_id": github_user_id,
-            "repository": repository,
-            "concept_id": concept_id,
-            "mastery": mastery,
-            "review_due_at": review_due_at,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
+        value = {"github_user_id": github_user_id, "repository": repository, "concept_id": concept_id, "mastery": mastery, "review_due_at": review_due_at, "updated_at": datetime.now(timezone.utc).isoformat()}
         with self._lock:
             self._learning[(github_user_id, repository, concept_id)] = deepcopy(value)
         return deepcopy(value)
@@ -102,3 +98,19 @@ class MemoryAnalysisStore:
         with self._lock:
             values = [deepcopy(value) for (user_id, repo, _), value in self._learning.items() if user_id == github_user_id and repo == repository]
         return sorted(values, key=lambda value: value["concept_id"])
+
+    def put_concept_vectors(self, analysis_id: str, concepts: list[dict[str, Any]]) -> None:
+        with self._lock:
+            for concept in concepts:
+                self._concept_vectors[(analysis_id, concept["id"])] = deepcopy(concept)
+
+    def find_similar_concepts(self, analysis_id: str, concept_id: str, limit: int = 5) -> list[dict[str, Any]]:
+        with self._lock:
+            target = self._concept_vectors.get((analysis_id, concept_id))
+            if target is None:
+                return []
+            vector = target["vector"]
+            candidates = [deepcopy(value) for (aid, cid), value in self._concept_vectors.items() if aid == analysis_id and cid != concept_id]
+        def distance(item: dict[str, Any]) -> float:
+            return sum((left - right) ** 2 for left, right in zip(vector, item["vector"])) ** 0.5
+        return [{"concept": item["concept"], "distance": distance(item)} for item in sorted(candidates, key=distance)[:limit]]
