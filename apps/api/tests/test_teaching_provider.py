@@ -117,3 +117,34 @@ def test_runtime_requires_complete_configuration_and_defaults_off():
         "TEACHING_LLM_API_KEY": "secret",
     })
     assert isinstance(provider, JsonHttpTeachingProvider)
+
+
+@pytest.mark.parametrize("endpoint", [
+    "http://localhost:1234/v1/chat/completions",
+    "http://127.0.0.1:1234/v1/chat/completions",
+    "http://[::1]:1234/v1/chat/completions",
+    "http://host.docker.internal:1234/v1/chat/completions",
+])
+def test_runtime_allows_cleartext_only_for_local_model_servers(endpoint):
+    provider = build_teaching_provider({
+        "CARD_IN_REPO_TEACHING_PROVIDER": "json_http",
+        "TEACHING_LLM_ENDPOINT": endpoint,
+        "TEACHING_LLM_MODEL": "local-model",
+        "TEACHING_LLM_API_KEY": "local-secret",
+    })
+    assert isinstance(provider, JsonHttpTeachingProvider)
+
+
+@pytest.mark.parametrize("endpoint", [
+    "http://llm.example.com/v1/chat/completions",
+    "ftp://llm.example.com/chat",
+    "llm.example.com/chat",
+])
+def test_runtime_rejects_remote_or_invalid_non_https_teaching_endpoint(endpoint):
+    with pytest.raises(RuntimeConfigurationError, match="must use HTTPS"):
+        build_teaching_provider({
+            "CARD_IN_REPO_TEACHING_PROVIDER": "json_http",
+            "TEACHING_LLM_ENDPOINT": endpoint,
+            "TEACHING_LLM_MODEL": "model",
+            "TEACHING_LLM_API_KEY": "secret",
+        })
