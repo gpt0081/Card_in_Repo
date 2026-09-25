@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 
+from card_in_repo_api.runtime import build_teaching_provider
 from card_in_repo_api.teaching import verify_on_demand_card_explanation
 from card_in_repo_api.teaching_provider import JsonHttpTeachingProvider
 
@@ -34,11 +35,14 @@ def main() -> None:
     if level not in {"intermediate", "advanced", "deep"}:
         raise SystemExit("TEACHING_SMOKE_LEVEL must be intermediate, advanced, or deep")
 
-    provider = JsonHttpTeachingProvider(
-        endpoint=require("TEACHING_LLM_ENDPOINT"),
-        model=require("TEACHING_LLM_MODEL"),
-        api_key=require("TEACHING_LLM_API_KEY"),
-    )
+    provider = build_teaching_provider({
+        "CARD_IN_REPO_TEACHING_PROVIDER": "json_http",
+        "TEACHING_LLM_ENDPOINT": require("TEACHING_LLM_ENDPOINT"),
+        "TEACHING_LLM_MODEL": require("TEACHING_LLM_MODEL"),
+        "TEACHING_LLM_API_KEY": require("TEACHING_LLM_API_KEY"),
+    })
+    if not isinstance(provider, JsonHttpTeachingProvider):
+        raise SystemExit("live smoke did not construct the json_http teaching provider")
     explanation = provider.explain_card(card, level)
     verified = verify_on_demand_card_explanation(card, explanation, level)
     claims = verified.get("claims", [])
