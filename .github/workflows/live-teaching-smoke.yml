@@ -3,14 +3,6 @@ name: live-teaching-smoke
 on:
   workflow_dispatch:
     inputs:
-      endpoint:
-        description: OpenAI-compatible chat completions endpoint
-        required: true
-        type: string
-      model:
-        description: Provider model name
-        required: true
-        type: string
       level:
         description: Teaching depth to verify
         required: true
@@ -30,8 +22,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      TEACHING_LLM_ENDPOINT: ${{ inputs.endpoint }}
-      TEACHING_LLM_MODEL: ${{ inputs.model }}
+      # Keep the credential destination under repository-admin control. A
+      # workflow-dispatch caller must not be able to redirect the API key to
+      # an arbitrary HTTPS endpoint.
+      TEACHING_LLM_ENDPOINT: ${{ vars.TEACHING_LLM_ENDPOINT }}
+      TEACHING_LLM_MODEL: ${{ vars.TEACHING_LLM_MODEL }}
       TEACHING_LLM_API_KEY: ${{ secrets.TEACHING_LLM_API_KEY }}
       TEACHING_SMOKE_LEVEL: ${{ inputs.level }}
     steps:
@@ -41,7 +36,10 @@ jobs:
           python-version: '3.12'
       - name: Install API
         run: python -m pip install -e apps/api
-      - name: Require provider credential
-        run: test -n "$TEACHING_LLM_API_KEY"
+      - name: Require provider configuration
+        run: |
+          test -n "$TEACHING_LLM_ENDPOINT"
+          test -n "$TEACHING_LLM_MODEL"
+          test -n "$TEACHING_LLM_API_KEY"
       - name: Probe provider and evidence verifier
         run: python apps/api/scripts/live_teaching_smoke.py
