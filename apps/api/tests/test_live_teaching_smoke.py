@@ -30,13 +30,16 @@ def test_live_smoke_reads_explicit_provider_configuration(monkeypatch):
     assert namespace["require"]("TEACHING_LLM_MODEL") == "provider-model"
 
 
-def test_live_smoke_defaults_to_eager_basic_path(monkeypatch):
+def test_live_smoke_defaults_to_eager_basic_ready_path(monkeypatch):
     monkeypatch.delenv("TEACHING_SMOKE_LEVEL", raising=False)
     source = SCRIPT_PATH.read_text()
 
     assert 'os.environ.get("TEACHING_SMOKE_LEVEL", "basic")' in source
-    assert "generate_card_basic_explanation(card, provider)" in source
-    assert 'level == "basic"' in source
+    assert "store_completed_analysis(" in source
+    assert "analyze_python(path, source)" in source
+    assert 'result.get("state") != "READY"' in source
+    assert 'verified = card.get("basic_explanation") or {}' in source
+    assert "generate_card_basic_explanation(card, provider)" not in source
 
 
 def test_live_smoke_workflow_defaults_to_basic():
