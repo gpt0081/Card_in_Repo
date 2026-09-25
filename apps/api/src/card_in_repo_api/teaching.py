@@ -56,6 +56,19 @@ def verify_on_demand_card_explanation(
     return verify_explanation(explanation, available, expected_level=level)
 
 
+def generate_card_basic_explanation(
+    card: dict[str, Any], provider: TeachingProvider | None
+) -> dict[str, Any]:
+    """Generate Basic teaching up front when a provider is configured, then verify it."""
+    if provider is None:
+        return build_card_basic_explanation(card)
+    available = {item["id"] for item in card.get("evidence", []) if item.get("id")}
+    if not available:
+        raise UnverifiedExplanation("cannot teach a card without source evidence")
+    explanation = provider.explain_card(card, "basic")
+    return verify_explanation(explanation, available, expected_level="basic")
+
+
 def _execution_order(item: dict[str, Any]) -> tuple[bool, int]:
     """Sort numbered execution evidence first and tolerate unresolved/null order facts."""
     order = item.get("order")
@@ -84,7 +97,7 @@ def build_basic_explanation(concept: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_card_basic_explanation(card: dict[str, Any]) -> dict[str, Any]:
-    """Teach only source-range facts that can be cited by this card."""
+    """Build the provider-free Basic fallback from source-range facts only."""
     evidence = card.get("evidence", [])
     available = {item["id"] for item in evidence if item.get("id")}
     if not available:
