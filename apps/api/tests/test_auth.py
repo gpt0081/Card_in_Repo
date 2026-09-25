@@ -22,7 +22,7 @@ def _clear_oauth_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def _set_oauth_env(monkeypatch: pytest.MonkeyPatch, callback_url: str) -> None:
     monkeypatch.setenv("CARD_IN_REPO_GITHUB_CLIENT_ID", "client")
     monkeypatch.setenv("CARD_IN_REPO_GITHUB_CLIENT_SECRET", "secret")
-    monkeypatch.setenv("CARD_IN_REPO_SESSION_SECRET", "session-secret")
+    monkeypatch.setenv("CARD_IN_REPO_SESSION_SECRET", "0123456789abcdef0123456789abcdef")
     monkeypatch.setenv("CARD_IN_REPO_GITHUB_CALLBACK_URL", callback_url)
 
 
@@ -53,6 +53,22 @@ def test_auth_settings_reject_partial_configuration(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("CARD_IN_REPO_GITHUB_CLIENT_ID", "client")
     with pytest.raises(ValueError, match="incomplete GitHub OAuth configuration"):
         auth_settings_from_env()
+
+
+def test_auth_settings_reject_weak_session_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_oauth_env(monkeypatch)
+    _set_oauth_env(monkeypatch, "https://card-in-repo.example/v1/auth/github/callback")
+    monkeypatch.setenv("CARD_IN_REPO_SESSION_SECRET", "too-short")
+    with pytest.raises(ValueError, match="at least 32 bytes"):
+        auth_settings_from_env()
+
+
+def test_auth_settings_accept_32_byte_session_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_oauth_env(monkeypatch)
+    _set_oauth_env(monkeypatch, "https://card-in-repo.example/v1/auth/github/callback")
+    settings = auth_settings_from_env()
+    assert settings is not None
+    assert len(settings.session_secret.encode()) == 32
 
 
 def test_auth_settings_require_https_for_remote_callback(monkeypatch: pytest.MonkeyPatch) -> None:
