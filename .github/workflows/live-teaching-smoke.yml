@@ -1,0 +1,46 @@
+name: live-teaching-smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      endpoint:
+        description: OpenAI-compatible chat completions endpoint
+        required: true
+        type: string
+      model:
+        description: Provider model name
+        required: true
+        type: string
+      level:
+        description: Teaching depth to verify
+        required: true
+        default: intermediate
+        type: choice
+        options:
+          - intermediate
+          - advanced
+          - deep
+
+permissions:
+  contents: read
+
+jobs:
+  live-provider:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TEACHING_LLM_ENDPOINT: ${{ inputs.endpoint }}
+      TEACHING_LLM_MODEL: ${{ inputs.model }}
+      TEACHING_LLM_API_KEY: ${{ secrets.TEACHING_LLM_API_KEY }}
+      TEACHING_SMOKE_LEVEL: ${{ inputs.level }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install API
+        run: python -m pip install -e apps/api
+      - name: Require provider credential
+        run: test -n "$TEACHING_LLM_API_KEY"
+      - name: Probe provider and evidence verifier
+        run: python apps/api/scripts/live_teaching_smoke.py
