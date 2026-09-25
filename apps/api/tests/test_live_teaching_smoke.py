@@ -3,7 +3,9 @@ from pathlib import Path
 import pytest
 
 
-SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "live_teaching_smoke.py"
+API_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_PATH = API_ROOT / "scripts" / "live_teaching_smoke.py"
+WORKFLOW_PATH = API_ROOT.parents[1] / ".github" / "workflows" / "live-teaching-smoke.yml"
 
 
 def load_script_namespace() -> dict[str, object]:
@@ -35,6 +37,14 @@ def test_live_smoke_defaults_to_eager_basic_path(monkeypatch):
     assert 'os.environ.get("TEACHING_SMOKE_LEVEL", "basic")' in source
     assert "generate_card_basic_explanation(card, provider)" in source
     assert 'level == "basic"' in source
+
+
+def test_live_smoke_workflow_defaults_to_basic():
+    workflow = WORKFLOW_PATH.read_text()
+
+    assert "default: basic" in workflow
+    assert "          - basic" in workflow
+    assert "TEACHING_SMOKE_LEVEL: ${{ inputs.level }}" in workflow
 
 
 def test_live_smoke_keeps_deeper_levels_available():
