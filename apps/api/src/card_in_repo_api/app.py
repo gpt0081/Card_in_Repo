@@ -13,7 +13,7 @@ from .jobs import AnalysisJob, AnalysisJobQueue
 from .runtime import build_analysis_queue, build_analysis_store, build_teaching_provider
 from .source_artifacts import SourceArtifactStore, build_source_artifact_store
 from .store import AnalysisStore
-from .teaching import TeachingProvider, UnverifiedExplanation, build_card_basic_explanation, verify_on_demand_card_explanation
+from .teaching import TeachingProvider, UnverifiedExplanation, generate_card_basic_explanation, verify_on_demand_card_explanation
 from .teaching_provider import TeachingProviderError
 
 app = FastAPI(title="Card in Repo API", version="0.1.0")
@@ -90,7 +90,7 @@ def store_completed_analysis(repository: str, commit_sha: str, files: dict[str, 
                 card_id = f"card:{sha256((analysis_id + symbol['id'] + str(segment_index)).encode()).hexdigest()[:16]}"
                 card_range = {"start": {"line": start}, "end": {"line": end}}
                 card = {"id": card_id, "analysis_id": analysis_id, "repository": repository, "commit_sha": commit_sha, "path": path, "symbol_id": symbol["id"], "symbol_name": symbol["name"], "range": card_range, "parent_symbol_range": symbol["range"], "segment": {"index": segment_index, "count": len(segments), "previous_card_id": None, "next_card_id": None}, "source": excerpt, "evidence": [{"id": evidence_id, "type": "SOURCE_RANGE", "path": path, "range": card_range}]}
-                card["basic_explanation"] = build_card_basic_explanation(card)
+                card["basic_explanation"] = generate_card_basic_explanation(card, _TEACHING_PROVIDER)
                 if symbol_cards:
                     previous = symbol_cards[-1]
                     card["segment"]["previous_card_id"] = previous["id"]
