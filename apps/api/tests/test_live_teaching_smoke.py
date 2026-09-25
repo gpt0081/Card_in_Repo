@@ -47,6 +47,18 @@ def test_live_smoke_workflow_defaults_to_basic():
     assert "TEACHING_SMOKE_LEVEL: ${{ inputs.level }}" in workflow
 
 
+def test_live_smoke_workflow_pins_credential_destination_to_repository_config():
+    workflow = WORKFLOW_PATH.read_text()
+
+    assert "TEACHING_LLM_ENDPOINT: ${{ vars.TEACHING_LLM_ENDPOINT }}" in workflow
+    assert "TEACHING_LLM_MODEL: ${{ vars.TEACHING_LLM_MODEL }}" in workflow
+    assert "TEACHING_LLM_API_KEY: ${{ secrets.TEACHING_LLM_API_KEY }}" in workflow
+    assert "inputs.endpoint" not in workflow
+    assert "inputs.model" not in workflow
+    assert 'test -n "$TEACHING_LLM_ENDPOINT"' in workflow
+    assert 'test -n "$TEACHING_LLM_MODEL"' in workflow
+
+
 def test_live_smoke_keeps_deeper_levels_available():
     source = SCRIPT_PATH.read_text()
 
