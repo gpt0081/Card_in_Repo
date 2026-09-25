@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from urllib.parse import urlparse
 
 import psycopg
 
@@ -65,6 +66,19 @@ def build_analysis_queue(env: dict[str, str] | None = None) -> AnalysisJobQueue:
     raise RuntimeConfigurationError(f"unsupported CARD_IN_REPO_QUEUE={backend!r}; expected 'memory' or 'redis'")
 
 
+def _validate_teaching_endpoint(endpoint: str) -> None:
+    """Keep provider credentials off cleartext remote transports while allowing local model servers."""
+    parsed = urlparse(endpoint)
+    if parsed.scheme == "https" and parsed.hostname:
+        return
+    local_hosts = {"localhost", "127.0.0.1", "::1", "host.docker.internal"}
+    if parsed.scheme == "http" and parsed.hostname in local_hosts:
+        return
+    raise RuntimeConfigurationError(
+        "TEACHING_LLM_ENDPOINT must use HTTPS; HTTP is allowed only for localhost, loopback, or host.docker.internal"
+    )
+
+
 def build_teaching_provider(env: dict[str, str] | None = None) -> TeachingProvider | None:
     """Build optional prose generation without granting it fact-layer authority."""
     values = os.environ if env is None else env
@@ -90,4 +104,5 @@ def build_teaching_provider(env: dict[str, str] | None = None) -> TeachingProvid
     ) if not value]
     if missing:
         raise RuntimeConfigurationError("json_http teaching provider requires " + ", ".join(missing))
+    _validate_teaching_endpoint(endpoint)
     return JsonHttpTeachingProvider(endpoint=endpoint, model=model, api_key=api_key)
