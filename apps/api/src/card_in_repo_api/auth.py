@@ -3,12 +3,13 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import time
 from dataclasses import dataclass
 from typing import Any, Protocol
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from fastapi import APIRouter, HTTPException, Request as FastAPIRequest
@@ -70,20 +71,51 @@ class GitHubHTTPClient:
         return payload
 
 
+def _is_loopback_host(hostname: str | None) -> bool:
+    if not hostname:
+        return False
+    if hostname.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
+def _validate_callback_url(callback_url: str, *, secure_cookie: bool) -> None:
+    parsed = urlparse(callback_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("CARD_IN_REPO_GITHUB_CALLBACK_URL must be an absolute HTTP(S) URL")
+    if parsed.scheme != "https" and not _is_loopback_host(parsed.hostname):
+        raise ValueError("remote GitHub OAuth callback URLs must use HTTPS")
+    if not secure_cookie and not _is_loopback_host(parsed.hostname):
+        raise ValueError("insecure OAuth cookies are allowed only for loopback development callbacks")
+
+
 def auth_settings_from_env() -> AuthSettings | None:
-    client_id = os.getenv("CARD_IN_REPO_GITHUB_CLIENT_ID")
-    client_secret = os.getenv("CARD_IN_REPO_GITHUB_CLIENT_SECRET")
-    session_secret = os.getenv("CARD_IN_REPO_SESSION_SECRET")
-    callback_url = os.getenv("CARD_IN_REPO_GITHUB_CALLBACK_URL")
-    if not all((client_id, client_secret, session_secret, callback_url)):
+    values = {
+        "CARD_IN_REPO_GITHUB_CLIENT_ID": os.getenv("CARD_IN_REPO_GITHUB_CLIENT_ID", "").strip(),
+        "CARD_IN_REPO_GITHUB_CLIENT_SECRET": os.getenv("CARD_IN_REPO_GITHUB_CLIENT_SECRET", "").strip(),
+        "CARD_IN_REPO_SESSION_SECRET": os.getenv("CARD_IN_REPO_SESSION_SECRET", "").strip(),
+        "CARD_IN_REPO_GITHUB_CALLBACK_URL": os.getenv("CARD_IN_REPO_GITHUB_CALLBACK_URL", "").strip(),
+    }
+    configured = [name for name, value in values.items() if value]
+    if not configured:
         return None
+    missing = [name for name, value in values.items() if not value]
+    if missing:
+        raise ValueError("incomplete GitHub OAuth configuration; missing: " + ", ".join(missing))
+
+    secure_cookie = os.getenv("CARD_IN_REPO_INSECURE_COOKIE") != "1"
+    callback_url = values["CARD_IN_REPO_GITHUB_CALLBACK_URL"]
+    _validate_callback_url(callback_url, secure_cookie=secure_cookie)
     return AuthSettings(
-        client_id=client_id,
-        client_secret=client_secret,
-        session_secret=session_secret,
+        client_id=values["CARD_IN_REPO_GITHUB_CLIENT_ID"],
+        client_secret=values["CARD_IN_REPO_GITHUB_CLIENT_SECRET"],
+        session_secret=values["CARD_IN_REPO_SESSION_SECRET"],
         callback_url=callback_url,
         app_url=os.getenv("CARD_IN_REPO_APP_URL", "/"),
-        secure_cookie=os.getenv("CARD_IN_REPO_INSECURE_COOKIE") != "1",
+        secure_cookie=secure_cookie,
     )
 
 
