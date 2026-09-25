@@ -28,12 +28,26 @@ class DeterministicTestTeachingProvider:
         }
 
 
+def _decode_json_text(text: str) -> Any:
+    """Decode strict JSON, tolerating only a single whole-response JSON Markdown fence."""
+    candidate = text.strip()
+    if candidate.startswith("```") and candidate.endswith("```"):
+        lines = candidate.splitlines()
+        if len(lines) < 3 or lines[0].strip().lower() not in {"```", "```json"} or lines[-1].strip() != "```":
+            raise TeachingProviderError("teaching provider returned invalid fenced JSON")
+        candidate = "\n".join(lines[1:-1]).strip()
+    try:
+        return json.loads(candidate)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise TeachingProviderError("teaching provider returned non-JSON message content") from exc
+
+
 def _decode_message_content(content: Any) -> dict[str, Any]:
     """Accept common OpenAI-compatible JSON message shapes, but never prose fallback."""
     if isinstance(content, dict):
         result = content
     elif isinstance(content, str):
-        result = json.loads(content)
+        result = _decode_json_text(content)
     elif isinstance(content, list):
         text_parts = []
         for part in content:
@@ -43,7 +57,7 @@ def _decode_message_content(content: Any) -> dict[str, Any]:
                 text_parts.append(part["text"])
         if not text_parts:
             raise TeachingProviderError("teaching provider returned no JSON message content")
-        result = json.loads("".join(text_parts))
+        result = _decode_json_text("".join(text_parts))
     else:
         raise TeachingProviderError("teaching provider returned unsupported message content")
     if not isinstance(result, dict):
