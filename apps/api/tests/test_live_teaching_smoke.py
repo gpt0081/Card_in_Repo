@@ -117,9 +117,14 @@ def test_live_smoke_workflow_provides_postgres_persistence():
     assert "DATABASE_URL: postgresql://card_in_repo:card_in_repo@localhost:5432/card_in_repo_live_smoke" in workflow
 
 
-def test_live_smoke_keeps_deeper_levels_available():
+def test_live_smoke_deeper_levels_use_runtime_handler_and_verify_durable_cache():
     source = SCRIPT_PATH.read_text()
 
     for level in ("intermediate", "advanced", "deep"):
         assert f'"{level}"' in source
-    assert "verify_on_demand_card_explanation(card, explanation, level)" in source
+    assert "verified = get_card_teaching(card_id, level)" in source
+    assert "cached_store = PostgresAnalysisStore" in source
+    assert 'get("on_demand_teaching")' in source
+    assert "cached != verified" in source
+    assert "provider.explain_card(card, level)" not in source
+    assert "verify_on_demand_card_explanation(card, explanation, level)" not in source
