@@ -73,6 +73,7 @@ class JsonHttpTeachingProvider:
     model: str
     api_key: str
     timeout_seconds: float = 30.0
+    max_response_bytes: int = 1_048_576
     opener: Callable[..., Any] = urlopen
 
     def explain_card(self, card: dict[str, Any], level: str) -> dict[str, Any]:
@@ -112,7 +113,10 @@ class JsonHttpTeachingProvider:
         )
         try:
             with self.opener(request, timeout=self.timeout_seconds) as response:
-                body = json.loads(response.read().decode())
+                raw = response.read(self.max_response_bytes + 1)
+                if len(raw) > self.max_response_bytes:
+                    raise TeachingProviderError("teaching provider response exceeds size limit")
+                body = json.loads(raw.decode())
             content = body["choices"][0]["message"]["content"]
             return _decode_message_content(content)
         except TeachingProviderError:
