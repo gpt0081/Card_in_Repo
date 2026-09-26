@@ -79,6 +79,32 @@ def _validate_teaching_endpoint(endpoint: str) -> None:
     )
 
 
+def _positive_float(values: dict[str, str], name: str, default: float) -> float:
+    raw = values.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise RuntimeConfigurationError(f"{name} must be a positive number") from exc
+    if value <= 0:
+        raise RuntimeConfigurationError(f"{name} must be a positive number")
+    return value
+
+
+def _positive_int(values: dict[str, str], name: str, default: int) -> int:
+    raw = values.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeConfigurationError(f"{name} must be a positive integer") from exc
+    if value <= 0:
+        raise RuntimeConfigurationError(f"{name} must be a positive integer")
+    return value
+
+
 def build_teaching_provider(env: dict[str, str] | None = None) -> TeachingProvider | None:
     """Build optional prose generation without granting it fact-layer authority."""
     values = os.environ if env is None else env
@@ -105,4 +131,12 @@ def build_teaching_provider(env: dict[str, str] | None = None) -> TeachingProvid
     if missing:
         raise RuntimeConfigurationError("json_http teaching provider requires " + ", ".join(missing))
     _validate_teaching_endpoint(endpoint)
-    return JsonHttpTeachingProvider(endpoint=endpoint, model=model, api_key=api_key)
+    timeout_seconds = _positive_float(values, "TEACHING_LLM_TIMEOUT_SECONDS", 30.0)
+    max_response_bytes = _positive_int(values, "TEACHING_LLM_MAX_RESPONSE_BYTES", 1_048_576)
+    return JsonHttpTeachingProvider(
+        endpoint=endpoint,
+        model=model,
+        api_key=api_key,
+        timeout_seconds=timeout_seconds,
+        max_response_bytes=max_response_bytes,
+    )
