@@ -2,64 +2,67 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Callable, Protocol
+from typing import Any, Callable
 from urllib.request import Request, urlopen
 
 
 class TeachingProviderError(RuntimeError):
-    pass
-
-
-class TeachingProvider(Protocol):
-    def explain_card(self, card: dict[str, Any], level: str) -> dict[str, Any]: ...
-
-
-def _decode_message_content(content: Any) -> dict[str, Any]:
-    if isinstance(content, dict):
-        result = content
-    elif isinstance(content, str):
-        try:
-            result = json.loads(content)
-        except json.JSONDecodeError as exc:
-            raise TeachingProviderError("teaching provider content must be JSON") from exc
-    elif isinstance(content, list):
-        text = "".join(
-            str(item.get("text", ""))
-            for item in content
-            if isinstance(item, dict) and item.get("type") == "text"
-        )
-        if not text:
-            raise TeachingProviderError("teaching provider content blocks contained no text")
-        try:
-            result = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise TeachingProviderError("teaching provider content blocks must contain JSON") from exc
-    else:
-        raise TeachingProviderError("teaching provider content has unsupported shape")
-    if not isinstance(result, dict):
-        raise TeachingProviderError("teaching provider content must decode to an object")
-    return result
+    """Raised when a configured teaching provider cannot return usable JSON."""
 
 
 @dataclass(frozen=True)
 class DeterministicTestTeachingProvider:
-    """Test-only provider that produces evidence-linked teaching text."""
+    """CI-only provider that proves the verified success path without an external LLM."""
 
     def explain_card(self, card: dict[str, Any], level: str) -> dict[str, Any]:
-        evidence = card.get("evidence") or []
-        if not evidence:
-            raise TeachingProviderError("card has no evidence")
-        evidence_id = evidence[0]["id"]
-        symbol = card.get("symbol_name") or card.get("path") or "This code"
+        evidence_ids = sorted(item["id"] for item in card.get("evidence", []) if item.get("id"))
+        if not evidence_ids:
+            raise TeachingProviderError("deterministic test provider requires card evidence")
+        symbol = card.get("symbol_name") or "this symbol"
         return {
             "level": level,
-            "claims": [
-                {
-                    "text": f"{symbol} is explained from its linked static-analysis evidence.",
-                    "evidence_ids": [evidence_id],
-                }
-            ],
+            "claims": [{
+                "text": f"At {level} depth, study {symbol} against its cited static source evidence.",
+                "evidence_ids": evidence_ids,
+            }],
         }
+
+
+def _decode_json_text(text: str) -> Any:
+    """Decode strict JSON, tolerating only a single whole-response JSON Markdown fence."""
+    candidate = text.strip()
+    if candidate.startswith("```") and candidate.endswith("```"):
+        lines = candidate.splitlines()
+        if len(lines) < 3 or lines[0].strip().lower() not in {"```", "```json"} or lines[-1].strip() != "```":
+            raise TeachingProviderError("teaching provider returned invalid fenced JSON")
+        candidate = "\n".join(lines[1:-1]).strip()
+    try:
+        return json.loads(candidate)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise TeachingProviderError("teaching provider returned non-JSON message content") from exc
+
+
+def _decode_message_content(content: Any) -> dict[str, Any]:
+    """Accept common OpenAI-compatible JSON message shapes, but never prose fallback."""
+    if isinstance(content, dict):
+        result = content
+    elif isinstance(content, str):
+        result = _decode_json_text(content)
+    elif isinstance(content, list):
+        text_parts = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") in {"text", "output_text"} and isinstance(part.get("text"), str):
+                text_parts.append(part["text"])
+        if not text_parts:
+            raise TeachingProviderError("teaching provider returned no JSON message content")
+        result = _decode_json_text("".join(text_parts))
+    else:
+        raise TeachingProviderError("teaching provider returned unsupported message content")
+    if not isinstance(result, dict):
+        raise TeachingProviderError("teaching provider response must be a JSON object")
+    return result
 
 
 @dataclass(frozen=True)
@@ -70,8 +73,6 @@ class JsonHttpTeachingProvider:
     model: str
     api_key: str
     timeout_seconds: float = 30.0
-    # Keep opener before new optional fields so existing positional test/integration
-    # adapters do not silently bind their opener as a byte limit.
     opener: Callable[..., Any] = urlopen
     max_response_bytes: int = 1_048_576
 
