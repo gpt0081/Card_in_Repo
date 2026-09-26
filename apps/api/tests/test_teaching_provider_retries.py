@@ -89,6 +89,30 @@ def test_provider_caps_retry_after_delay():
     assert sleeps == [2.0]
 
 
+def test_provider_supports_http_date_retry_after_and_caps_delay():
+    calls = 0
+    sleeps = []
+
+    def opener(request, timeout):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise http_error(429, {"Retry-After": "Wed, 31 Dec 2099 23:59:59 GMT"})
+        return Response(success_body())
+
+    provider = JsonHttpTeachingProvider(
+        "https://llm.invalid/chat",
+        "model",
+        "secret",
+        opener=opener,
+        sleeper=sleeps.append,
+    )
+
+    provider.explain_card(card(), "intermediate")
+    assert calls == 2
+    assert sleeps == [2.0]
+
+
 def test_provider_does_not_retry_non_transient_http_failure():
     calls = 0
 
