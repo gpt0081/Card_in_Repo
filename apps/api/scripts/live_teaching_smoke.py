@@ -17,6 +17,21 @@ def require(name: str) -> str:
     return value
 
 
+def provider_environment() -> dict[str, str]:
+    """Build the same provider configuration surface used by deployed runtime."""
+    values = {
+        "CARD_IN_REPO_TEACHING_PROVIDER": "json_http",
+        "TEACHING_LLM_ENDPOINT": require("TEACHING_LLM_ENDPOINT"),
+        "TEACHING_LLM_MODEL": require("TEACHING_LLM_MODEL"),
+        "TEACHING_LLM_API_KEY": require("TEACHING_LLM_API_KEY"),
+    }
+    for name in ("TEACHING_LLM_TIMEOUT_SECONDS", "TEACHING_LLM_MAX_RESPONSE_BYTES"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            values[name] = value
+    return values
+
+
 def main() -> None:
     source = "def normalize_repository(name):\n    return name.strip().lower()"
     path = "repository.py"
@@ -26,12 +41,7 @@ def main() -> None:
             "TEACHING_SMOKE_LEVEL must be basic, intermediate, advanced, or deep"
         )
 
-    provider = build_teaching_provider({
-        "CARD_IN_REPO_TEACHING_PROVIDER": "json_http",
-        "TEACHING_LLM_ENDPOINT": require("TEACHING_LLM_ENDPOINT"),
-        "TEACHING_LLM_MODEL": require("TEACHING_LLM_MODEL"),
-        "TEACHING_LLM_API_KEY": require("TEACHING_LLM_API_KEY"),
-    })
+    provider = build_teaching_provider(provider_environment())
     if not isinstance(provider, JsonHttpTeachingProvider):
         raise SystemExit("live smoke did not construct the json_http teaching provider")
 

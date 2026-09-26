@@ -30,6 +30,34 @@ def test_live_smoke_reads_explicit_provider_configuration(monkeypatch):
     assert namespace["require"]("TEACHING_LLM_MODEL") == "provider-model"
 
 
+def test_live_smoke_forwards_optional_runtime_resource_bounds(monkeypatch):
+    monkeypatch.setenv("TEACHING_LLM_ENDPOINT", "https://provider.example/v1/chat/completions")
+    monkeypatch.setenv("TEACHING_LLM_MODEL", "provider-model")
+    monkeypatch.setenv("TEACHING_LLM_API_KEY", "secret")
+    monkeypatch.setenv("TEACHING_LLM_TIMEOUT_SECONDS", "47.5")
+    monkeypatch.setenv("TEACHING_LLM_MAX_RESPONSE_BYTES", "262144")
+    namespace = load_script_namespace()
+
+    values = namespace["provider_environment"]()
+
+    assert values["TEACHING_LLM_TIMEOUT_SECONDS"] == "47.5"
+    assert values["TEACHING_LLM_MAX_RESPONSE_BYTES"] == "262144"
+
+
+def test_live_smoke_omits_empty_runtime_resource_bounds(monkeypatch):
+    monkeypatch.setenv("TEACHING_LLM_ENDPOINT", "https://provider.example/v1/chat/completions")
+    monkeypatch.setenv("TEACHING_LLM_MODEL", "provider-model")
+    monkeypatch.setenv("TEACHING_LLM_API_KEY", "secret")
+    monkeypatch.setenv("TEACHING_LLM_TIMEOUT_SECONDS", "")
+    monkeypatch.delenv("TEACHING_LLM_MAX_RESPONSE_BYTES", raising=False)
+    namespace = load_script_namespace()
+
+    values = namespace["provider_environment"]()
+
+    assert "TEACHING_LLM_TIMEOUT_SECONDS" not in values
+    assert "TEACHING_LLM_MAX_RESPONSE_BYTES" not in values
+
+
 def test_live_smoke_defaults_to_eager_basic_ready_path(monkeypatch):
     monkeypatch.delenv("TEACHING_SMOKE_LEVEL", raising=False)
     source = SCRIPT_PATH.read_text()
@@ -60,6 +88,15 @@ def test_live_smoke_workflow_pins_credential_destination_to_repository_config():
     assert "inputs.model" not in workflow
     assert 'test -n "$TEACHING_LLM_ENDPOINT"' in workflow
     assert 'test -n "$TEACHING_LLM_MODEL"' in workflow
+
+
+def test_live_smoke_workflow_uses_repository_resource_bounds():
+    workflow = WORKFLOW_PATH.read_text()
+
+    assert "TEACHING_LLM_TIMEOUT_SECONDS: ${{ vars.TEACHING_LLM_TIMEOUT_SECONDS }}" in workflow
+    assert "TEACHING_LLM_MAX_RESPONSE_BYTES: ${{ vars.TEACHING_LLM_MAX_RESPONSE_BYTES }}" in workflow
+    assert "inputs.timeout" not in workflow
+    assert "inputs.max_response" not in workflow
 
 
 def test_live_smoke_keeps_deeper_levels_available():

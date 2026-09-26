@@ -28,6 +28,11 @@ jobs:
       TEACHING_LLM_ENDPOINT: ${{ vars.TEACHING_LLM_ENDPOINT }}
       TEACHING_LLM_MODEL: ${{ vars.TEACHING_LLM_MODEL }}
       TEACHING_LLM_API_KEY: ${{ secrets.TEACHING_LLM_API_KEY }}
+      # Optional repository variables let the live probe exercise the same
+      # provider-specific resource bounds as the deployed API. Empty values
+      # intentionally fall back to the runtime defaults.
+      TEACHING_LLM_TIMEOUT_SECONDS: ${{ vars.TEACHING_LLM_TIMEOUT_SECONDS }}
+      TEACHING_LLM_MAX_RESPONSE_BYTES: ${{ vars.TEACHING_LLM_MAX_RESPONSE_BYTES }}
       TEACHING_SMOKE_LEVEL: ${{ inputs.level }}
     steps:
       - uses: actions/checkout@v4
