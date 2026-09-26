@@ -4,8 +4,8 @@ import os
 
 from card_in_repo_analyzer import analyze_python
 from card_in_repo_api.app import set_store, set_teaching_provider, store_completed_analysis
+from card_in_repo_api.postgres_store import PostgresAnalysisStore
 from card_in_repo_api.runtime import build_teaching_provider
-from card_in_repo_api.store import MemoryAnalysisStore
 from card_in_repo_api.teaching import verify_on_demand_card_explanation
 from card_in_repo_api.teaching_provider import JsonHttpTeachingProvider
 
@@ -45,11 +45,11 @@ def main() -> None:
     if not isinstance(provider, JsonHttpTeachingProvider):
         raise SystemExit("live smoke did not construct the json_http teaching provider")
 
-    # Exercise the same eager Basic boundary that production analysis uses:
-    # static facts -> feature/card construction -> provider-backed Basic ->
-    # evidence verification -> READY persistence. This catches integration
-    # failures that a direct provider helper call cannot see.
-    store = MemoryAnalysisStore()
+    # Exercise the same durable store and eager Basic boundary used by the
+    # deployed runtime: static facts -> feature/card construction ->
+    # provider-backed Basic -> evidence verification -> PostgreSQL persistence.
+    store = PostgresAnalysisStore(require("DATABASE_URL"))
+    store.initialize()
     set_store(store)
     set_teaching_provider(provider)
     result = store_completed_analysis(
@@ -62,9 +62,12 @@ def main() -> None:
     if result.get("state") != "READY" or not result.get("card_ids"):
         raise SystemExit("live smoke did not reach READY with a generated card")
 
-    card = store.get_card(result["card_ids"][0])
+    # Re-open the store before reading back the card so this probe proves the
+    # result crossed the database boundary instead of surviving in process state.
+    persisted_store = PostgresAnalysisStore(require("DATABASE_URL"))
+    card = persisted_store.get_card(result["card_ids"][0])
     if card is None:
-        raise SystemExit("live smoke READY card was not persisted")
+        raise SystemExit("live smoke READY card was not persisted to PostgreSQL")
 
     if level == "basic":
         verified = card.get("basic_explanation") or {}
@@ -78,7 +81,7 @@ def main() -> None:
     print(
         "live teaching smoke passed: "
         f"state={result['state']}, cards={len(result['card_ids'])}, "
-        f"level={level}, verified_claims={len(claims)}"
+        f"level={level}, verified_claims={len(claims)}, store=postgres"
     )
 
 
