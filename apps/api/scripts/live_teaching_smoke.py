@@ -89,6 +89,14 @@ def main() -> None:
         if cached != verified:
             raise SystemExit("verified on-demand teaching was not persisted to PostgreSQL")
 
+        # Remove the provider and read through the deployed handler again. A
+        # successful second read now proves the durable cache is actually used,
+        # rather than merely written while every request still calls the LLM.
+        set_teaching_provider(None)
+        cached_response = get_card_teaching(card_id, level)
+        if cached_response != verified:
+            raise SystemExit("durable on-demand teaching cache was not served consistently")
+
     claims = verified.get("claims", [])
     if not verified.get("verified") or not claims:
         raise SystemExit("provider response did not survive evidence verification")

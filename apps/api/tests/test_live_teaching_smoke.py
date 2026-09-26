@@ -128,3 +128,11 @@ def test_live_smoke_deeper_levels_use_runtime_handler_and_verify_durable_cache()
     assert "cached != verified" in source
     assert "provider.explain_card(card, level)" not in source
     assert "verify_on_demand_card_explanation(card, explanation, level)" not in source
+
+
+def test_live_smoke_proves_durable_cache_hit_without_provider():
+    source = SCRIPT_PATH.read_text()
+
+    assert "set_teaching_provider(None)" in source
+    assert "cached_response = get_card_teaching(card_id, level)" in source
+    assert "cached_response != verified" in source
