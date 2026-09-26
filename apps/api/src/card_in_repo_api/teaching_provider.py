@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from time import sleep
 from typing import Any, Callable
 from urllib.error import HTTPError
@@ -84,12 +86,19 @@ class JsonHttpTeachingProvider:
     sleeper: Callable[[float], None] = sleep
 
     def _retry_delay(self, error: HTTPError) -> float:
-        """Honor a small Retry-After window without letting an upstream stall workers."""
+        """Honor Retry-After delay-seconds or HTTP-date, capped so upstream cannot pin workers."""
         raw = error.headers.get("Retry-After", "") if error.headers else ""
         try:
-            return min(max(float(raw), 0.0), 2.0)
+            delay = float(raw)
         except (TypeError, ValueError):
-            return 0.0
+            try:
+                retry_at = parsedate_to_datetime(raw)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                delay = (retry_at - datetime.now(timezone.utc)).total_seconds()
+            except (TypeError, ValueError, OverflowError):
+                delay = 0.0
+        return min(max(delay, 0.0), 2.0)
 
     def explain_card(self, card: dict[str, Any], level: str) -> dict[str, Any]:
         evidence = [
