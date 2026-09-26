@@ -152,6 +152,10 @@ class JsonHttpTeachingProvider:
                 raise TeachingProviderError("teaching provider returned an unusable response") from exc
             except TeachingProviderError:
                 raise
-            except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
+            except OSError as exc:
+                if attempt + 1 < attempts:
+                    continue
+                raise TeachingProviderError("teaching provider transport failed") from exc
+            except (ValueError, KeyError, IndexError, TypeError) as exc:
                 raise TeachingProviderError("teaching provider returned an unusable response") from exc
         raise TeachingProviderError("teaching provider returned an unusable response")
