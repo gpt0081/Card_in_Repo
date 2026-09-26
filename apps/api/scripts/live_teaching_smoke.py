@@ -14,6 +14,9 @@ from card_in_repo_api.runtime import build_teaching_provider
 from card_in_repo_api.teaching_provider import JsonHttpTeachingProvider
 
 
+TEACHING_LEVELS = ("basic", "intermediate", "advanced", "deep")
+
+
 def require(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
@@ -36,14 +39,28 @@ def provider_environment() -> dict[str, str]:
     return values
 
 
+def requested_levels() -> tuple[str, ...]:
+    level = os.environ.get("TEACHING_SMOKE_LEVEL", "all").strip().lower()
+    if level == "all":
+        return TEACHING_LEVELS
+    if level not in TEACHING_LEVELS:
+        raise SystemExit(
+            "TEACHING_SMOKE_LEVEL must be all, basic, intermediate, advanced, or deep"
+        )
+    return (level,)
+
+
+def require_verified(level: str, verified: dict) -> int:
+    claims = verified.get("claims", [])
+    if verified.get("level") != level or not verified.get("verified") or not claims:
+        raise SystemExit(f"{level} provider response did not survive evidence verification")
+    return len(claims)
+
+
 def main() -> None:
     source = "def normalize_repository(name):\n    return name.strip().lower()"
     path = "repository.py"
-    level = os.environ.get("TEACHING_SMOKE_LEVEL", "basic").strip().lower()
-    if level not in {"basic", "intermediate", "advanced", "deep"}:
-        raise SystemExit(
-            "TEACHING_SMOKE_LEVEL must be basic, intermediate, advanced, or deep"
-        )
+    levels = requested_levels()
 
     provider = build_teaching_provider(provider_environment())
     if not isinstance(provider, JsonHttpTeachingProvider):
@@ -74,12 +91,18 @@ def main() -> None:
     if card is None:
         raise SystemExit("live smoke READY card was not persisted to PostgreSQL")
 
-    if level == "basic":
-        verified = card.get("basic_explanation") or {}
-    else:
-        # Use the deployed endpoint handler rather than duplicating its provider,
-        # verifier, and cache-write sequence inside the smoke script.
+    verified_counts: dict[str, int] = {}
+    if "basic" in levels:
+        verified_counts["basic"] = require_verified(
+            "basic", card.get("basic_explanation") or {}
+        )
+
+    for level in (item for item in levels if item != "basic"):
+        # Each requested depth must prove the deployed endpoint handler rather
+        # than calling the provider/verifier directly.
+        set_teaching_provider(provider)
         verified = get_card_teaching(card_id, level)
+
         # Re-open once more and require the verified on-demand result to have
         # crossed PostgreSQL. This catches provider success with a broken cache
         # write, which would otherwise regenerate the same teaching every read.
@@ -87,23 +110,27 @@ def main() -> None:
         cached_card = cached_store.get_card(card_id)
         cached = ((cached_card or {}).get("on_demand_teaching") or {}).get(level)
         if cached != verified:
-            raise SystemExit("verified on-demand teaching was not persisted to PostgreSQL")
+            raise SystemExit(
+                f"verified {level} teaching was not persisted to PostgreSQL"
+            )
 
         # Remove the provider and read through the deployed handler again. A
-        # successful second read now proves the durable cache is actually used,
-        # rather than merely written while every request still calls the LLM.
+        # successful second read proves the durable cache is actually used.
         set_teaching_provider(None)
         cached_response = get_card_teaching(card_id, level)
         if cached_response != verified:
-            raise SystemExit("durable on-demand teaching cache was not served consistently")
+            raise SystemExit(
+                f"durable {level} teaching cache was not served consistently"
+            )
+        verified_counts[level] = require_verified(level, verified)
 
-    claims = verified.get("claims", [])
-    if not verified.get("verified") or not claims:
-        raise SystemExit("provider response did not survive evidence verification")
+    summary = ",".join(
+        f"{level}:{verified_counts[level]}" for level in levels if level in verified_counts
+    )
     print(
         "live teaching smoke passed: "
         f"state={result['state']}, cards={len(result['card_ids'])}, "
-        f"level={level}, verified_claims={len(claims)}, store=postgres"
+        f"levels={summary}, store=postgres"
     )
 
 

@@ -6,9 +6,10 @@ on:
       level:
         description: Teaching depth to verify
         required: true
-        default: basic
+        default: all
         type: choice
         options:
+          - all
           - basic
           - intermediate
           - advanced
