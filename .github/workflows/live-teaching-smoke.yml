@@ -21,6 +21,22 @@ jobs:
   live-provider:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    services:
+      postgres:
+        # pgvector/pgvector is the upstream pgvector image (PostgreSQL License).
+        # Keep the live probe on the same durable database capability as runtime.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: card_in_repo
+          POSTGRES_PASSWORD: card_in_repo
+          POSTGRES_DB: card_in_repo_live_smoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U card_in_repo -d card_in_repo_live_smoke"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       # Keep the credential destination under repository-admin control. A
       # workflow-dispatch caller must not be able to redirect the API key to
@@ -34,6 +50,7 @@ jobs:
       TEACHING_LLM_TIMEOUT_SECONDS: ${{ vars.TEACHING_LLM_TIMEOUT_SECONDS }}
       TEACHING_LLM_MAX_RESPONSE_BYTES: ${{ vars.TEACHING_LLM_MAX_RESPONSE_BYTES }}
       TEACHING_SMOKE_LEVEL: ${{ inputs.level }}
+      DATABASE_URL: postgresql://card_in_repo:card_in_repo@localhost:5432/card_in_repo_live_smoke
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -46,5 +63,5 @@ jobs:
           test -n "$TEACHING_LLM_ENDPOINT"
           test -n "$TEACHING_LLM_MODEL"
           test -n "$TEACHING_LLM_API_KEY"
-      - name: Probe provider and evidence verifier
+      - name: Probe provider, evidence verifier, and durable persistence
         run: python apps/api/scripts/live_teaching_smoke.py
