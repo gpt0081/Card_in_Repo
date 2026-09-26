@@ -70,6 +70,16 @@ def test_live_smoke_defaults_to_eager_basic_ready_path(monkeypatch):
     assert "generate_card_basic_explanation(card, provider)" not in source
 
 
+def test_live_smoke_reloads_ready_card_from_postgres():
+    source = SCRIPT_PATH.read_text()
+
+    assert 'PostgresAnalysisStore(require("DATABASE_URL"))' in source
+    assert "store.initialize()" in source
+    assert "MemoryAnalysisStore" not in source
+    assert "persisted_store = PostgresAnalysisStore" in source
+    assert "persisted_store.get_card" in source
+
+
 def test_live_smoke_workflow_defaults_to_basic():
     workflow = WORKFLOW_PATH.read_text()
 
@@ -97,6 +107,14 @@ def test_live_smoke_workflow_uses_repository_resource_bounds():
     assert "TEACHING_LLM_MAX_RESPONSE_BYTES: ${{ vars.TEACHING_LLM_MAX_RESPONSE_BYTES }}" in workflow
     assert "inputs.timeout" not in workflow
     assert "inputs.max_response" not in workflow
+
+
+def test_live_smoke_workflow_provides_postgres_persistence():
+    workflow = WORKFLOW_PATH.read_text()
+
+    assert "image: pgvector/pgvector:pg16" in workflow
+    assert "POSTGRES_DB: card_in_repo_live_smoke" in workflow
+    assert "DATABASE_URL: postgresql://card_in_repo:card_in_repo@localhost:5432/card_in_repo_live_smoke" in workflow
 
 
 def test_live_smoke_keeps_deeper_levels_available():
