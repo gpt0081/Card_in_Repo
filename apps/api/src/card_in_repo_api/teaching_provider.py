@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from http.client import IncompleteRead
 from time import sleep
 from typing import Any, Callable
 from urllib.error import HTTPError
@@ -152,6 +153,10 @@ class JsonHttpTeachingProvider:
                 raise TeachingProviderError("teaching provider returned an unusable response") from exc
             except TeachingProviderError:
                 raise
-            except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
+            except (OSError, IncompleteRead) as exc:
+                if attempt + 1 < attempts:
+                    continue
+                raise TeachingProviderError("teaching provider transport failed") from exc
+            except (ValueError, KeyError, IndexError, TypeError) as exc:
                 raise TeachingProviderError("teaching provider returned an unusable response") from exc
         raise TeachingProviderError("teaching provider returned an unusable response")

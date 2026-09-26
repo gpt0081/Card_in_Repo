@@ -154,3 +154,46 @@ def test_provider_stops_after_bounded_attempts():
     with pytest.raises(TeachingProviderError):
         provider.explain_card(card(), "intermediate")
     assert calls == 2
+
+
+def test_provider_retries_one_transport_failure_then_succeeds_without_extra_sleep():
+    calls = 0
+
+    def opener(request, timeout):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise TimeoutError("upstream timed out")
+        return Response(success_body())
+
+    provider = JsonHttpTeachingProvider(
+        "https://llm.invalid/chat",
+        "model",
+        "secret",
+        opener=opener,
+        sleeper=lambda delay: pytest.fail("transport retry must not add a second delay after timeout"),
+    )
+
+    assert provider.explain_card(card(), "intermediate")["level"] == "intermediate"
+    assert calls == 2
+
+
+def test_provider_bounds_repeated_transport_failures():
+    calls = 0
+
+    def opener(request, timeout):
+        nonlocal calls
+        calls += 1
+        raise ConnectionError("connection reset")
+
+    provider = JsonHttpTeachingProvider(
+        "https://llm.invalid/chat",
+        "model",
+        "secret",
+        opener=opener,
+        max_attempts=2,
+    )
+
+    with pytest.raises(TeachingProviderError, match="transport failed"):
+        provider.explain_card(card(), "intermediate")
+    assert calls == 2
