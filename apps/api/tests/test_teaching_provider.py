@@ -17,8 +17,9 @@ class Response:
     def __exit__(self, *args):
         return False
 
-    def read(self):
-        return json.dumps(self.body).encode()
+    def read(self, size=-1):
+        data = json.dumps(self.body).encode()
+        return data if size < 0 else data[:size]
 
 
 def card():
@@ -102,6 +103,19 @@ def test_non_json_content_never_falls_back_to_unverified_prose():
         opener=lambda request, timeout: Response({"choices": [{"message": {"content": "plain prose"}}]}),
     )
     with pytest.raises(TeachingProviderError):
+        provider.explain_card(card(), "advanced")
+
+
+def test_provider_rejects_response_larger_than_configured_limit():
+    oversized = {"choices": [{"message": {"content": "x" * 512}}]}
+    provider = JsonHttpTeachingProvider(
+        "https://llm.invalid/chat",
+        "model",
+        "secret",
+        max_response_bytes=128,
+        opener=lambda request, timeout: Response(oversized),
+    )
+    with pytest.raises(TeachingProviderError, match="exceeds size limit"):
         provider.explain_card(card(), "advanced")
 
 

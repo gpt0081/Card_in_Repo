@@ -16,8 +16,9 @@ class Response:
     def __exit__(self, *args):
         return False
 
-    def read(self):
-        return json.dumps({"choices": [{"message": {"content": self.content}}]}).encode()
+    def read(self, size=-1):
+        data = json.dumps({"choices": [{"message": {"content": self.content}}]}).encode()
+        return data if size < 0 else data[:size]
 
 
 def card():
