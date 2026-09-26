@@ -3,10 +3,14 @@ from __future__ import annotations
 import os
 
 from card_in_repo_analyzer import analyze_python
-from card_in_repo_api.app import set_store, set_teaching_provider, store_completed_analysis
+from card_in_repo_api.app import (
+    get_card_teaching,
+    set_store,
+    set_teaching_provider,
+    store_completed_analysis,
+)
 from card_in_repo_api.postgres_store import PostgresAnalysisStore
 from card_in_repo_api.runtime import build_teaching_provider
-from card_in_repo_api.teaching import verify_on_demand_card_explanation
 from card_in_repo_api.teaching_provider import JsonHttpTeachingProvider
 
 
@@ -62,18 +66,28 @@ def main() -> None:
     if result.get("state") != "READY" or not result.get("card_ids"):
         raise SystemExit("live smoke did not reach READY with a generated card")
 
+    card_id = result["card_ids"][0]
     # Re-open the store before reading back the card so this probe proves the
     # result crossed the database boundary instead of surviving in process state.
     persisted_store = PostgresAnalysisStore(require("DATABASE_URL"))
-    card = persisted_store.get_card(result["card_ids"][0])
+    card = persisted_store.get_card(card_id)
     if card is None:
         raise SystemExit("live smoke READY card was not persisted to PostgreSQL")
 
     if level == "basic":
         verified = card.get("basic_explanation") or {}
     else:
-        explanation = provider.explain_card(card, level)
-        verified = verify_on_demand_card_explanation(card, explanation, level)
+        # Use the deployed endpoint handler rather than duplicating its provider,
+        # verifier, and cache-write sequence inside the smoke script.
+        verified = get_card_teaching(card_id, level)
+        # Re-open once more and require the verified on-demand result to have
+        # crossed PostgreSQL. This catches provider success with a broken cache
+        # write, which would otherwise regenerate the same teaching every read.
+        cached_store = PostgresAnalysisStore(require("DATABASE_URL"))
+        cached_card = cached_store.get_card(card_id)
+        cached = ((cached_card or {}).get("on_demand_teaching") or {}).get(level)
+        if cached != verified:
+            raise SystemExit("verified on-demand teaching was not persisted to PostgreSQL")
 
     claims = verified.get("claims", [])
     if not verified.get("verified") or not claims:
