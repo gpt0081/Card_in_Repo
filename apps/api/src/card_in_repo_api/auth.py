@@ -105,6 +105,8 @@ def auth_settings_from_env() -> AuthSettings | None:
     missing = [name for name, value in values.items() if not value]
     if missing:
         raise ValueError("incomplete GitHub OAuth configuration; missing: " + ", ".join(missing))
+    if len(values["CARD_IN_REPO_SESSION_SECRET"].encode()) < 32:
+        raise ValueError("CARD_IN_REPO_SESSION_SECRET must be at least 32 bytes")
 
     secure_cookie = os.getenv("CARD_IN_REPO_INSECURE_COOKIE") != "1"
     callback_url = values["CARD_IN_REPO_GITHUB_CALLBACK_URL"]
