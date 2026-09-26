@@ -133,6 +133,38 @@ def test_runtime_requires_complete_configuration_and_defaults_off():
     assert isinstance(provider, JsonHttpTeachingProvider)
 
 
+def test_runtime_applies_configured_provider_resource_bounds():
+    provider = build_teaching_provider({
+        "CARD_IN_REPO_TEACHING_PROVIDER": "json_http",
+        "TEACHING_LLM_ENDPOINT": "https://llm.invalid/chat",
+        "TEACHING_LLM_MODEL": "model",
+        "TEACHING_LLM_API_KEY": "secret",
+        "TEACHING_LLM_TIMEOUT_SECONDS": "12.5",
+        "TEACHING_LLM_MAX_RESPONSE_BYTES": "262144",
+    })
+    assert isinstance(provider, JsonHttpTeachingProvider)
+    assert provider.timeout_seconds == 12.5
+    assert provider.max_response_bytes == 262144
+
+
+@pytest.mark.parametrize(("name", "value"), [
+    ("TEACHING_LLM_TIMEOUT_SECONDS", "0"),
+    ("TEACHING_LLM_TIMEOUT_SECONDS", "not-a-number"),
+    ("TEACHING_LLM_MAX_RESPONSE_BYTES", "-1"),
+    ("TEACHING_LLM_MAX_RESPONSE_BYTES", "1.5"),
+])
+def test_runtime_rejects_invalid_provider_resource_bounds(name, value):
+    env = {
+        "CARD_IN_REPO_TEACHING_PROVIDER": "json_http",
+        "TEACHING_LLM_ENDPOINT": "https://llm.invalid/chat",
+        "TEACHING_LLM_MODEL": "model",
+        "TEACHING_LLM_API_KEY": "secret",
+        name: value,
+    }
+    with pytest.raises(RuntimeConfigurationError):
+        build_teaching_provider(env)
+
+
 @pytest.mark.parametrize("endpoint", [
     "http://localhost:1234/v1/chat/completions",
     "http://127.0.0.1:1234/v1/chat/completions",
