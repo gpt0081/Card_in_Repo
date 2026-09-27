@@ -181,6 +181,35 @@ def test_runtime_allows_cleartext_only_for_local_model_servers(endpoint):
     assert isinstance(provider, JsonHttpTeachingProvider)
 
 
+def test_runtime_allows_tailscale_http_only_with_explicit_opt_in():
+    base = {
+        "CARD_IN_REPO_TEACHING_PROVIDER": "json_http",
+        "TEACHING_LLM_ENDPOINT": "http://100.101.102.103:1234/v1/chat/completions",
+        "TEACHING_LLM_MODEL": "local-model",
+        "TEACHING_LLM_API_KEY": "local-secret",
+    }
+    with pytest.raises(RuntimeConfigurationError, match="must use HTTPS"):
+        build_teaching_provider(base)
+
+    provider = build_teaching_provider({**base, "CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING": "1"})
+    assert isinstance(provider, JsonHttpTeachingProvider)
+
+
+@pytest.mark.parametrize("endpoint", [
+    "http://llm.example.com/v1/chat/completions",
+    "http://203.0.113.10:1234/v1/chat/completions",
+])
+def test_private_http_opt_in_never_allows_public_remote_endpoints(endpoint):
+    with pytest.raises(RuntimeConfigurationError, match="must use HTTPS"):
+        build_teaching_provider({
+            "CARD_IN_REPO_TEACHING_PROVIDER": "json_http",
+            "TEACHING_LLM_ENDPOINT": endpoint,
+            "TEACHING_LLM_MODEL": "model",
+            "TEACHING_LLM_API_KEY": "secret",
+            "CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING": "1",
+        })
+
+
 @pytest.mark.parametrize("endpoint", [
     "http://llm.example.com/v1/chat/completions",
     "ftp://llm.example.com/chat",
