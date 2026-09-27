@@ -19,3 +19,11 @@ def test_live_smoke_workflow_forwards_private_http_opt_in():
         "CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING: "
         "${{ vars.CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING }}"
     ) in workflow
+
+
+def test_private_live_smoke_requires_a_networked_runner():
+    workflow = WORKFLOW_PATH.read_text()
+    assert "runs-on: ${{ vars.LIVE_TEACHING_RUNNER || 'ubuntu-latest' }}" in workflow
+    assert "LIVE_TEACHING_RUNNER: ${{ vars.LIVE_TEACHING_RUNNER }}" in workflow
+    assert 'test -n "$LIVE_TEACHING_RUNNER"' in workflow
+    assert "Private teaching smoke requires LIVE_TEACHING_RUNNER" in workflow
