@@ -32,7 +32,11 @@ def provider_environment() -> dict[str, str]:
         "TEACHING_LLM_MODEL": require("TEACHING_LLM_MODEL"),
         "TEACHING_LLM_API_KEY": require("TEACHING_LLM_API_KEY"),
     }
-    for name in ("TEACHING_LLM_TIMEOUT_SECONDS", "TEACHING_LLM_MAX_RESPONSE_BYTES"):
+    for name in (
+        "CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING",
+        "TEACHING_LLM_TIMEOUT_SECONDS",
+        "TEACHING_LLM_MAX_RESPONSE_BYTES",
+    ):
         value = os.environ.get(name, "").strip()
         if value:
             values[name] = value
@@ -66,9 +70,6 @@ def main() -> None:
     if not isinstance(provider, JsonHttpTeachingProvider):
         raise SystemExit("live smoke did not construct the json_http teaching provider")
 
-    # Exercise the same durable store and eager Basic boundary used by the
-    # deployed runtime: static facts -> feature/card construction ->
-    # provider-backed Basic -> evidence verification -> PostgreSQL persistence.
     store = PostgresAnalysisStore(require("DATABASE_URL"))
     store.initialize()
     set_store(store)
@@ -84,8 +85,6 @@ def main() -> None:
         raise SystemExit("live smoke did not reach READY with a generated card")
 
     card_id = result["card_ids"][0]
-    # Re-open the store before reading back the card so this probe proves the
-    # result crossed the database boundary instead of surviving in process state.
     persisted_store = PostgresAnalysisStore(require("DATABASE_URL"))
     card = persisted_store.get_card(card_id)
     if card is None:
@@ -98,14 +97,9 @@ def main() -> None:
         )
 
     for level in (item for item in levels if item != "basic"):
-        # Each requested depth must prove the deployed endpoint handler rather
-        # than calling the provider/verifier directly.
         set_teaching_provider(provider)
         verified = get_card_teaching(card_id, level)
 
-        # Re-open once more and require the verified on-demand result to have
-        # crossed PostgreSQL. This catches provider success with a broken cache
-        # write, which would otherwise regenerate the same teaching every read.
         cached_store = PostgresAnalysisStore(require("DATABASE_URL"))
         cached_card = cached_store.get_card(card_id)
         cached = ((cached_card or {}).get("on_demand_teaching") or {}).get(level)
@@ -114,8 +108,6 @@ def main() -> None:
                 f"verified {level} teaching was not persisted to PostgreSQL"
             )
 
-        # Remove the provider and read through the deployed handler again. A
-        # successful second read proves the durable cache is actually used.
         set_teaching_provider(None)
         cached_response = get_card_teaching(card_id, level)
         if cached_response != verified:
