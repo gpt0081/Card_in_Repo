@@ -79,15 +79,23 @@ def _is_private_model_address(hostname: str | None) -> bool:
     return address.is_private or address.is_link_local or address in tailscale_cgnat
 
 
+def _is_local_teaching_endpoint(endpoint: str, *, allow_private_http: bool = False) -> bool:
+    """Identify cleartext endpoints that are deliberately confined to local/private model routes."""
+    parsed = urlparse(endpoint)
+    if parsed.scheme != "http":
+        return False
+    local_hosts = {"localhost", "127.0.0.1", "::1", "host.docker.internal"}
+    return parsed.hostname in local_hosts or (
+        allow_private_http and _is_private_model_address(parsed.hostname)
+    )
+
+
 def _validate_teaching_endpoint(endpoint: str, *, allow_private_http: bool = False) -> None:
     """Keep provider credentials off cleartext remote transports while allowing explicit local-model routes."""
     parsed = urlparse(endpoint)
     if parsed.scheme == "https" and parsed.hostname:
         return
-    local_hosts = {"localhost", "127.0.0.1", "::1", "host.docker.internal"}
-    if parsed.scheme == "http" and parsed.hostname in local_hosts:
-        return
-    if parsed.scheme == "http" and allow_private_http and _is_private_model_address(parsed.hostname):
+    if _is_local_teaching_endpoint(endpoint, allow_private_http=allow_private_http):
         return
     raise RuntimeConfigurationError(
         "TEACHING_LLM_ENDPOINT must use HTTPS; HTTP is allowed for local hosts, or literal private/Tailscale "
@@ -142,12 +150,15 @@ def build_teaching_provider(env: dict[str, str] | None = None) -> TeachingProvid
     missing = [name for name, value in (
         ("TEACHING_LLM_ENDPOINT", endpoint),
         ("TEACHING_LLM_MODEL", model),
-        ("TEACHING_LLM_API_KEY", api_key),
     ) if not value]
     if missing:
         raise RuntimeConfigurationError("json_http teaching provider requires " + ", ".join(missing))
     allow_private_http = values.get("CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING", "").strip() == "1"
     _validate_teaching_endpoint(endpoint, allow_private_http=allow_private_http)
+    if not api_key and not _is_local_teaching_endpoint(endpoint, allow_private_http=allow_private_http):
+        raise RuntimeConfigurationError(
+            "TEACHING_LLM_API_KEY is required for non-local json_http teaching endpoints"
+        )
     timeout_seconds = _positive_float(values, "TEACHING_LLM_TIMEOUT_SECONDS", 30.0)
     max_response_bytes = _positive_int(values, "TEACHING_LLM_MAX_RESPONSE_BYTES", 1_048_576)
     return JsonHttpTeachingProvider(
