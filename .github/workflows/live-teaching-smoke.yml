@@ -51,6 +51,10 @@ jobs:
       TEACHING_LLM_ENDPOINT: ${{ vars.TEACHING_LLM_ENDPOINT }}
       TEACHING_LLM_MODEL: ${{ vars.TEACHING_LLM_MODEL }}
       TEACHING_LLM_API_KEY: ${{ secrets.TEACHING_LLM_API_KEY }}
+      # Local OpenAI-compatible servers may be keyless. Forward the same
+      # explicit private-HTTP opt-in used by the deployed API; runtime policy
+      # still rejects unsafe endpoints when this repository variable is off.
+      CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING: ${{ vars.CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING }}
       # Optional repository variables let the live probe exercise the same
       # provider-specific resource bounds as the deployed API. Empty values
       # intentionally fall back to the runtime defaults.
@@ -69,6 +73,5 @@ jobs:
         run: |
           test -n "$TEACHING_LLM_ENDPOINT"
           test -n "$TEACHING_LLM_MODEL"
-          test -n "$TEACHING_LLM_API_KEY"
       - name: Probe provider, evidence verifier, and durable persistence
         run: python apps/api/scripts/live_teaching_smoke.py
