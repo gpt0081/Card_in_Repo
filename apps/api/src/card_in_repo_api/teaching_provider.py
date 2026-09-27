@@ -79,7 +79,7 @@ class JsonHttpTeachingProvider:
 
     endpoint: str
     model: str
-    api_key: str
+    api_key: str = ""
     timeout_seconds: float = 30.0
     opener: Callable[..., Any] = urlopen
     max_response_bytes: int = 1_048_576
@@ -130,10 +130,13 @@ class JsonHttpTeachingProvider:
             ],
             "response_format": {"type": "json_object"},
         }
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         request = Request(
             self.endpoint,
             data=json.dumps(payload).encode(),
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
         attempts = max(1, self.max_attempts)
