@@ -26,9 +26,10 @@ concurrency:
 
 jobs:
   public-provider:
-    # GitHub-hosted Linux runners can use service containers, so public HTTPS
-    # providers get an isolated pgvector database with no repository setup.
-    if: ${{ vars.CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING != '1' && vars.CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING != 'true' }}
+    # A configured self-hosted runner means the provider is network-local/private,
+    # regardless of whether its endpoint uses HTTP or HTTPS. Without that runner,
+    # public HTTPS providers use an isolated GitHub-hosted pgvector database.
+    if: ${{ vars.LIVE_TEACHING_RUNNER == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     services:
@@ -69,13 +70,13 @@ jobs:
         run: python apps/api/scripts/live_teaching_smoke.py
 
   private-provider:
-    # GitHub Actions service containers require Linux. A Mac Studio can still
-    # be the networked self-hosted runner: point LIVE_TEACHING_DATABASE_URL at
-    # PostgreSQL already running on that runner or elsewhere on its Tailscale
-    # network. The fallback runner exists only to fail preflight instead of
-    # leaving a dispatch queued forever when the label is missing.
-    if: ${{ vars.CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING == '1' || vars.CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING == 'true' }}
-    runs-on: ${{ vars.LIVE_TEACHING_RUNNER || 'ubuntu-latest' }}
+    # Selecting a self-hosted runner is the explicit execution-mode switch. This
+    # also covers localhost providers and private HTTPS endpoints, which do not
+    # need the cleartext-private HTTP opt-in. A Mac Studio can therefore host the
+    # runner and provider directly. Point LIVE_TEACHING_DATABASE_URL at PostgreSQL
+    # reachable from that runner or elsewhere on its Tailscale network.
+    if: ${{ vars.LIVE_TEACHING_RUNNER != '' }}
+    runs-on: ${{ vars.LIVE_TEACHING_RUNNER }}
     timeout-minutes: 5
     env:
       TEACHING_LLM_ENDPOINT: ${{ vars.TEACHING_LLM_ENDPOINT }}
@@ -96,10 +97,6 @@ jobs:
         run: python -m pip install -e apps/api
       - name: Require private provider configuration
         run: |
-          test -n "$LIVE_TEACHING_RUNNER" || {
-            echo "Private teaching smoke requires LIVE_TEACHING_RUNNER pointing at a networked self-hosted runner." >&2
-            exit 1
-          }
           test -n "$TEACHING_LLM_ENDPOINT"
           test -n "$TEACHING_LLM_MODEL"
           test -n "$DATABASE_URL" || {
