@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from ipaddress import ip_address, ip_network
 from urllib.parse import urlparse
 
 import psycopg
@@ -66,16 +67,31 @@ def build_analysis_queue(env: dict[str, str] | None = None) -> AnalysisJobQueue:
     raise RuntimeConfigurationError(f"unsupported CARD_IN_REPO_QUEUE={backend!r}; expected 'memory' or 'redis'")
 
 
-def _validate_teaching_endpoint(endpoint: str) -> None:
-    """Keep provider credentials off cleartext remote transports while allowing local model servers."""
+def _is_private_model_address(hostname: str | None) -> bool:
+    """Accept literal RFC1918/link-local/Tailscale addresses, never arbitrary DNS names."""
+    if not hostname:
+        return False
+    try:
+        address = ip_address(hostname)
+    except ValueError:
+        return False
+    tailscale_cgnat = ip_network("100.64.0.0/10")
+    return address.is_private or address.is_link_local or address in tailscale_cgnat
+
+
+def _validate_teaching_endpoint(endpoint: str, *, allow_private_http: bool = False) -> None:
+    """Keep provider credentials off cleartext remote transports while allowing explicit local-model routes."""
     parsed = urlparse(endpoint)
     if parsed.scheme == "https" and parsed.hostname:
         return
     local_hosts = {"localhost", "127.0.0.1", "::1", "host.docker.internal"}
     if parsed.scheme == "http" and parsed.hostname in local_hosts:
         return
+    if parsed.scheme == "http" and allow_private_http and _is_private_model_address(parsed.hostname):
+        return
     raise RuntimeConfigurationError(
-        "TEACHING_LLM_ENDPOINT must use HTTPS; HTTP is allowed only for localhost, loopback, or host.docker.internal"
+        "TEACHING_LLM_ENDPOINT must use HTTPS; HTTP is allowed for local hosts, or literal private/Tailscale "
+        "addresses only when CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING=1"
     )
 
 
@@ -130,7 +146,8 @@ def build_teaching_provider(env: dict[str, str] | None = None) -> TeachingProvid
     ) if not value]
     if missing:
         raise RuntimeConfigurationError("json_http teaching provider requires " + ", ".join(missing))
-    _validate_teaching_endpoint(endpoint)
+    allow_private_http = values.get("CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING", "").strip() == "1"
+    _validate_teaching_endpoint(endpoint, allow_private_http=allow_private_http)
     timeout_seconds = _positive_float(values, "TEACHING_LLM_TIMEOUT_SECONDS", 30.0)
     max_response_bytes = _positive_int(values, "TEACHING_LLM_MAX_RESPONSE_BYTES", 1_048_576)
     return JsonHttpTeachingProvider(
