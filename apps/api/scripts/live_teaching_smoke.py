@@ -30,8 +30,10 @@ def provider_environment() -> dict[str, str]:
         "CARD_IN_REPO_TEACHING_PROVIDER": "json_http",
         "TEACHING_LLM_ENDPOINT": require("TEACHING_LLM_ENDPOINT"),
         "TEACHING_LLM_MODEL": require("TEACHING_LLM_MODEL"),
-        "TEACHING_LLM_API_KEY": require("TEACHING_LLM_API_KEY"),
     }
+    api_key = os.environ.get("TEACHING_LLM_API_KEY", "").strip()
+    if api_key:
+        values["TEACHING_LLM_API_KEY"] = api_key
     for name in (
         "CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING",
         "TEACHING_LLM_TIMEOUT_SECONDS",
