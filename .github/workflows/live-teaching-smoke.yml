@@ -18,6 +18,12 @@ on:
 permissions:
   contents: read
 
+# A live probe spends external-provider quota and mutates a shared smoke database.
+# Keep at most one run active so repeated dispatches cannot race or multiply cost.
+concurrency:
+  group: live-teaching-smoke
+  cancel-in-progress: false
+
 jobs:
   live-provider:
     runs-on: ubuntu-latest
