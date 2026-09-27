@@ -197,7 +197,7 @@ def test_runtime_allows_tailscale_http_only_with_explicit_opt_in():
 
 @pytest.mark.parametrize("endpoint", [
     "http://llm.example.com/v1/chat/completions",
-    "http://203.0.113.10:1234/v1/chat/completions",
+    "http://8.8.8.8:1234/v1/chat/completions",
 ])
 def test_private_http_opt_in_never_allows_public_remote_endpoints(endpoint):
     with pytest.raises(RuntimeConfigurationError, match="must use HTTPS"):
