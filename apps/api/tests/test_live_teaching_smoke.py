@@ -14,17 +14,38 @@ def load_script_namespace() -> dict[str, object]:
     return namespace
 
 
-def test_live_smoke_requires_explicit_provider_configuration(monkeypatch):
-    monkeypatch.delenv("TEACHING_LLM_API_KEY", raising=False)
+def test_live_smoke_requires_endpoint_and_model(monkeypatch):
+    monkeypatch.delenv("TEACHING_LLM_ENDPOINT", raising=False)
+    monkeypatch.setenv("TEACHING_LLM_MODEL", "provider-model")
     namespace = load_script_namespace()
-    with pytest.raises(SystemExit, match="TEACHING_LLM_API_KEY"):
-        namespace["require"]("TEACHING_LLM_API_KEY")
+    with pytest.raises(SystemExit, match="TEACHING_LLM_ENDPOINT"):
+        namespace["provider_environment"]()
 
 
 def test_live_smoke_reads_explicit_provider_configuration(monkeypatch):
     monkeypatch.setenv("TEACHING_LLM_MODEL", "provider-model")
     namespace = load_script_namespace()
     assert namespace["require"]("TEACHING_LLM_MODEL") == "provider-model"
+
+
+def test_live_smoke_allows_keyless_local_provider_configuration(monkeypatch):
+    monkeypatch.setenv("TEACHING_LLM_ENDPOINT", "http://127.0.0.1:1234/v1/chat/completions")
+    monkeypatch.setenv("TEACHING_LLM_MODEL", "local-model")
+    monkeypatch.delenv("TEACHING_LLM_API_KEY", raising=False)
+    namespace = load_script_namespace()
+    values = namespace["provider_environment"]()
+    assert values["TEACHING_LLM_ENDPOINT"].startswith("http://127.0.0.1")
+    assert values["TEACHING_LLM_MODEL"] == "local-model"
+    assert "TEACHING_LLM_API_KEY" not in values
+
+
+def test_live_smoke_forwards_api_key_when_configured(monkeypatch):
+    monkeypatch.setenv("TEACHING_LLM_ENDPOINT", "https://provider.example/v1/chat/completions")
+    monkeypatch.setenv("TEACHING_LLM_MODEL", "provider-model")
+    monkeypatch.setenv("TEACHING_LLM_API_KEY", "secret")
+    namespace = load_script_namespace()
+    values = namespace["provider_environment"]()
+    assert values["TEACHING_LLM_API_KEY"] == "secret"
 
 
 def test_live_smoke_forwards_optional_runtime_resource_bounds(monkeypatch):
