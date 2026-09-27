@@ -127,6 +127,13 @@ def test_live_smoke_workflow_provides_postgres_persistence():
     assert "DATABASE_URL: postgresql://card_in_repo:card_in_repo@localhost:5432/card_in_repo_live_smoke" in workflow
 
 
+def test_live_smoke_workflow_serializes_external_provider_runs():
+    workflow = WORKFLOW_PATH.read_text()
+    assert "concurrency:" in workflow
+    assert "group: live-teaching-smoke" in workflow
+    assert "cancel-in-progress: false" in workflow
+
+
 def test_live_smoke_deeper_levels_use_runtime_handler_and_verify_durable_cache():
     source = SCRIPT_PATH.read_text()
     for level in ("intermediate", "advanced", "deep"):
