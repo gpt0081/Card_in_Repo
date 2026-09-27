@@ -26,7 +26,12 @@ concurrency:
 
 jobs:
   live-provider:
-    runs-on: ubuntu-latest
+    # Public HTTPS providers can use GitHub-hosted runners. Private/Tailscale
+    # providers must set LIVE_TEACHING_RUNNER to a self-hosted runner label
+    # that can actually route to the configured endpoint (for example a
+    # Tailscale-connected runner). The preflight below refuses private mode
+    # when that repository-admin-controlled runner is not configured.
+    runs-on: ${{ vars.LIVE_TEACHING_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 5
     services:
       postgres:
@@ -51,6 +56,11 @@ jobs:
       TEACHING_LLM_ENDPOINT: ${{ vars.TEACHING_LLM_ENDPOINT }}
       TEACHING_LLM_MODEL: ${{ vars.TEACHING_LLM_MODEL }}
       TEACHING_LLM_API_KEY: ${{ secrets.TEACHING_LLM_API_KEY }}
+      # Local OpenAI-compatible servers may be keyless. Forward the same
+      # explicit private-HTTP opt-in used by the deployed API; runtime policy
+      # still rejects unsafe endpoints when this repository variable is off.
+      CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING: ${{ vars.CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING }}
+      LIVE_TEACHING_RUNNER: ${{ vars.LIVE_TEACHING_RUNNER }}
       # Optional repository variables let the live probe exercise the same
       # provider-specific resource bounds as the deployed API. Empty values
       # intentionally fall back to the runtime defaults.
@@ -69,6 +79,11 @@ jobs:
         run: |
           test -n "$TEACHING_LLM_ENDPOINT"
           test -n "$TEACHING_LLM_MODEL"
-          test -n "$TEACHING_LLM_API_KEY"
+          if [ "$CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING" = "1" ] || [ "$CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING" = "true" ]; then
+            test -n "$LIVE_TEACHING_RUNNER" || {
+              echo "Private teaching smoke requires LIVE_TEACHING_RUNNER pointing at a networked self-hosted runner." >&2
+              exit 1
+            }
+          fi
       - name: Probe provider, evidence verifier, and durable persistence
         run: python apps/api/scripts/live_teaching_smoke.py
