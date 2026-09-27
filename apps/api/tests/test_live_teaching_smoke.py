@@ -174,3 +174,12 @@ def test_live_smoke_proves_each_durable_cache_hit_without_provider():
     assert "set_teaching_provider(None)" in source
     assert "cached_response = get_card_teaching(card_id, level)" in source
     assert "cached_response != verified" in source
+
+
+def test_live_smoke_workflow_selects_private_execution_by_runner_not_http_opt_in():
+    workflow = WORKFLOW_PATH.read_text()
+    assert "if: ${{ vars.LIVE_TEACHING_RUNNER == '' }}" in workflow
+    assert "if: ${{ vars.LIVE_TEACHING_RUNNER != '' }}" in workflow
+    assert "runs-on: ${{ vars.LIVE_TEACHING_RUNNER }}" in workflow
+    assert "vars.LIVE_TEACHING_RUNNER || 'ubuntu-latest'" not in workflow
+    assert "if: ${{ vars.CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING" not in workflow
