@@ -25,18 +25,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  live-provider:
-    # Public HTTPS providers can use GitHub-hosted runners. Private/Tailscale
-    # providers must set LIVE_TEACHING_RUNNER to a self-hosted runner label
-    # that can actually route to the configured endpoint (for example a
-    # Tailscale-connected runner). The preflight below refuses private mode
-    # when that repository-admin-controlled runner is not configured.
-    runs-on: ${{ vars.LIVE_TEACHING_RUNNER || 'ubuntu-latest' }}
+  public-provider:
+    # A configured self-hosted runner means the provider is network-local/private,
+    # regardless of whether its endpoint uses HTTP or HTTPS. Without that runner,
+    # public HTTPS providers use an isolated GitHub-hosted pgvector database.
+    if: ${{ vars.LIVE_TEACHING_RUNNER == '' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     services:
       postgres:
         # pgvector/pgvector is the upstream pgvector image (PostgreSQL License).
-        # Keep the live probe on the same durable database capability as runtime.
         image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: card_in_repo
@@ -50,20 +48,9 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      # Keep the credential destination under repository-admin control. A
-      # workflow-dispatch caller must not be able to redirect the API key to
-      # an arbitrary HTTPS endpoint.
       TEACHING_LLM_ENDPOINT: ${{ vars.TEACHING_LLM_ENDPOINT }}
       TEACHING_LLM_MODEL: ${{ vars.TEACHING_LLM_MODEL }}
       TEACHING_LLM_API_KEY: ${{ secrets.TEACHING_LLM_API_KEY }}
-      # Local OpenAI-compatible servers may be keyless. Forward the same
-      # explicit private-HTTP opt-in used by the deployed API; runtime policy
-      # still rejects unsafe endpoints when this repository variable is off.
-      CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING: ${{ vars.CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING }}
-      LIVE_TEACHING_RUNNER: ${{ vars.LIVE_TEACHING_RUNNER }}
-      # Optional repository variables let the live probe exercise the same
-      # provider-specific resource bounds as the deployed API. Empty values
-      # intentionally fall back to the runtime defaults.
       TEACHING_LLM_TIMEOUT_SECONDS: ${{ vars.TEACHING_LLM_TIMEOUT_SECONDS }}
       TEACHING_LLM_MAX_RESPONSE_BYTES: ${{ vars.TEACHING_LLM_MAX_RESPONSE_BYTES }}
       TEACHING_SMOKE_LEVEL: ${{ inputs.level }}
@@ -79,11 +66,42 @@ jobs:
         run: |
           test -n "$TEACHING_LLM_ENDPOINT"
           test -n "$TEACHING_LLM_MODEL"
-          if [ "$CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING" = "1" ] || [ "$CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING" = "true" ]; then
-            test -n "$LIVE_TEACHING_RUNNER" || {
-              echo "Private teaching smoke requires LIVE_TEACHING_RUNNER pointing at a networked self-hosted runner." >&2
-              exit 1
-            }
-          fi
+      - name: Probe provider, evidence verifier, and durable persistence
+        run: python apps/api/scripts/live_teaching_smoke.py
+
+  private-provider:
+    # Selecting a self-hosted runner is the explicit execution-mode switch. This
+    # also covers localhost providers and private HTTPS endpoints, which do not
+    # need the cleartext-private HTTP opt-in. A Mac Studio can therefore host the
+    # runner and provider directly. Point LIVE_TEACHING_DATABASE_URL at PostgreSQL
+    # reachable from that runner or elsewhere on its Tailscale network.
+    if: ${{ vars.LIVE_TEACHING_RUNNER != '' }}
+    runs-on: ${{ vars.LIVE_TEACHING_RUNNER }}
+    timeout-minutes: 5
+    env:
+      TEACHING_LLM_ENDPOINT: ${{ vars.TEACHING_LLM_ENDPOINT }}
+      TEACHING_LLM_MODEL: ${{ vars.TEACHING_LLM_MODEL }}
+      TEACHING_LLM_API_KEY: ${{ secrets.TEACHING_LLM_API_KEY }}
+      CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING: ${{ vars.CARD_IN_REPO_ALLOW_PRIVATE_HTTP_TEACHING }}
+      LIVE_TEACHING_RUNNER: ${{ vars.LIVE_TEACHING_RUNNER }}
+      TEACHING_LLM_TIMEOUT_SECONDS: ${{ vars.TEACHING_LLM_TIMEOUT_SECONDS }}
+      TEACHING_LLM_MAX_RESPONSE_BYTES: ${{ vars.TEACHING_LLM_MAX_RESPONSE_BYTES }}
+      TEACHING_SMOKE_LEVEL: ${{ inputs.level }}
+      DATABASE_URL: ${{ vars.LIVE_TEACHING_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install API
+        run: python -m pip install -e apps/api
+      - name: Require private provider configuration
+        run: |
+          test -n "$TEACHING_LLM_ENDPOINT"
+          test -n "$TEACHING_LLM_MODEL"
+          test -n "$DATABASE_URL" || {
+            echo "Private teaching smoke requires LIVE_TEACHING_DATABASE_URL pointing at PostgreSQL reachable from the self-hosted runner." >&2
+            exit 1
+          }
       - name: Probe provider, evidence verifier, and durable persistence
         run: python apps/api/scripts/live_teaching_smoke.py
