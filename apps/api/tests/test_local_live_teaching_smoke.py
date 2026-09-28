@@ -32,3 +32,14 @@ def test_local_live_smoke_can_use_existing_postgres_and_real_smoke_script():
     assert 'export DATABASE_URL' in source
     assert 'apps/api/scripts/live_teaching_smoke.py' in source
     assert 'TEACHING_SMOKE_LEVEL="${TEACHING_SMOKE_LEVEL:-all}"' in source
+
+
+def test_local_live_smoke_uses_disposable_virtualenv_instead_of_host_pip():
+    source = SCRIPT.read_text()
+    assert 'python3 -m venv "$VENV_DIR/venv"' in source
+    assert 'PYTHON="$VENV_DIR/venv/bin/python"' in source
+    assert '"$PYTHON" -m pip install -e "$ROOT/packages/analyzer"' in source
+    assert '"$PYTHON" -m pip install -e "$ROOT/apps/api"' in source
+    assert '"$PYTHON" "$ROOT/apps/api/scripts/live_teaching_smoke.py"' in source
+    assert 'python3 -m pip install' not in source
+    assert 'rm -rf "$VENV_DIR"' in source

@@ -12,7 +12,7 @@ export TEACHING_LLM_MODEL=<loaded-model-name>
 bash scripts/local_live_teaching_smoke.sh
 ```
 
-This path is intended for LM Studio, llama.cpp, or another compatible local server. An API key is optional. By default the launcher creates a disposable `pgvector/pgvector:pg16` PostgreSQL container bound only to `127.0.0.1:55432`, waits for readiness, runs the real smoke program, and removes the database container on exit. It refuses to take over a pre-existing container with the same name.
+This path is intended for LM Studio, llama.cpp, or another compatible local server. An API key is optional. By default the launcher creates a disposable `pgvector/pgvector:pg16` PostgreSQL container bound only to `127.0.0.1:55432`, waits for readiness, creates a disposable Python virtual environment, installs the analyzer/API packages there, runs the real smoke program, and removes both the database container and virtual environment on exit. The host Python environment is not modified, which keeps the path compatible with externally managed/Homebrew Python installations. The launcher refuses to take over a pre-existing container with the same name.
 
 The smoke exercises eager Basic generation, requested on-demand teaching depths, evidence verification, PostgreSQL persistence, and serving the durable deeper-level cache after the provider is detached. `TEACHING_SMOKE_LEVEL` may be set to `basic`, `intermediate`, `advanced`, or `deep`; the default is `all`.
 
