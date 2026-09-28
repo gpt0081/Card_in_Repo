@@ -10,11 +10,22 @@ def test_local_live_smoke_shell_is_syntactically_valid():
     subprocess.run(["bash", "-n", str(SCRIPT)], check=True)
 
 
-def test_local_live_smoke_requires_provider_endpoint_and_model():
+def test_local_live_smoke_requires_endpoint_but_can_discover_single_model():
     source = SCRIPT.read_text()
     assert "${TEACHING_LLM_ENDPOINT:?" in source
-    assert "${TEACHING_LLM_MODEL:?" in source
+    assert "${TEACHING_LLM_MODEL:?" not in source
+    assert '${TEACHING_LLM_ENDPOINT%/chat/completions}/models' in source
+    assert 'TEACHING_LLM_MODELS_ENDPOINT' in source
+    assert 'len(models) != 1' in source
+    assert 'set TEACHING_LLM_MODEL explicitly' in source
+    assert 'export TEACHING_LLM_MODEL' in source
     assert "TEACHING_LLM_API_KEY:?" not in source
+
+
+def test_local_live_smoke_model_discovery_preserves_optional_auth():
+    source = SCRIPT.read_text()
+    assert 'os.environ.get("TEACHING_LLM_API_KEY", "").strip()' in source
+    assert 'headers["Authorization"] = f"Bearer {api_key}"' in source
 
 
 def test_local_live_smoke_provisions_disposable_pgvector_by_default():
