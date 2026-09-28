@@ -40,10 +40,12 @@ if [[ -z "${LIVE_TEACHING_DATABASE_URL:-}" ]]; then
   STARTED_POSTGRES=1
 
   echo "waiting for disposable pgvector PostgreSQL on port ${POSTGRES_PORT}..."
-  for _ in $(seq 1 30); do
+  attempts=0
+  while (( attempts < 30 )); do
     if docker exec "$CONTAINER_NAME" pg_isready -U card_in_repo -d card_in_repo_live_smoke >/dev/null 2>&1; then
       break
     fi
+    attempts=$((attempts + 1))
     sleep 1
   done
   docker exec "$CONTAINER_NAME" pg_isready -U card_in_repo -d card_in_repo_live_smoke >/dev/null
@@ -56,5 +58,6 @@ if [[ "$TEACHING_LLM_ENDPOINT" == http://127.0.0.1:* || "$TEACHING_LLM_ENDPOINT"
   : # loopback HTTP is allowed by the runtime without a private-network opt-in
 fi
 
+python3 -m pip install -e "$ROOT/packages/analyzer"
 python3 -m pip install -e "$ROOT/apps/api"
 python3 "$ROOT/apps/api/scripts/live_teaching_smoke.py"
