@@ -35,11 +35,30 @@ if [[ -z "${TEACHING_LLM_MODEL:-}" ]]; then
 import json
 import os
 import sys
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 endpoint = os.environ["MODELS_ENDPOINT"]
-headers = {}
+parsed = urlparse(endpoint)
 api_key = os.environ.get("TEACHING_LLM_API_KEY", "").strip()
+loopback_hosts = {"localhost", "127.0.0.1", "::1"}
+
+# Discovery happens before the API runtime gets a chance to validate the chat
+# endpoint. Keep bearer credentials behind the same minimum transport boundary:
+# HTTPS anywhere, or cleartext HTTP only on the local loopback interface.
+if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+    print(f"refusing invalid model-discovery URL: {endpoint}", file=sys.stderr)
+    raise SystemExit(2)
+if api_key and parsed.scheme != "https" and parsed.hostname.lower() not in loopback_hosts:
+    print(
+        "refusing to send TEACHING_LLM_API_KEY to a non-HTTPS, non-loopback "
+        f"model-discovery endpoint: {endpoint}",
+        file=sys.stderr,
+    )
+    print("use HTTPS, a loopback endpoint, or set TEACHING_LLM_MODEL explicitly", file=sys.stderr)
+    raise SystemExit(2)
+
+headers = {}
 if api_key:
     headers["Authorization"] = f"Bearer {api_key}"
 try:
