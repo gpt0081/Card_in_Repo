@@ -22,10 +22,16 @@ def test_local_live_smoke_requires_endpoint_but_can_discover_single_model():
     assert "TEACHING_LLM_API_KEY:?" not in source
 
 
-def test_local_live_smoke_model_discovery_preserves_optional_auth():
+def test_local_live_smoke_model_discovery_preserves_optional_auth_safely():
     source = SCRIPT.read_text()
     assert 'os.environ.get("TEACHING_LLM_API_KEY", "").strip()' in source
-    assert 'headers["Authorization"] = f"Bearer {api_key}"' in source
+    assert 'parsed.scheme not in {"http", "https"}' in source
+    assert 'loopback_hosts = {"localhost", "127.0.0.1", "::1"}' in source
+    guard = 'if api_key and parsed.scheme != "https" and parsed.hostname.lower() not in loopback_hosts:'
+    authorization = 'headers["Authorization"] = f"Bearer {api_key}"'
+    assert guard in source
+    assert authorization in source
+    assert source.index(guard) < source.index(authorization)
 
 
 def test_local_live_smoke_provisions_disposable_pgvector_by_default():
