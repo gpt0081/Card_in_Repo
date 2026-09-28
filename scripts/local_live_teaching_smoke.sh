@@ -9,13 +9,22 @@ CONTAINER_NAME="${CARD_IN_REPO_SMOKE_POSTGRES_CONTAINER:-card-in-repo-live-smoke
 POSTGRES_PORT="${CARD_IN_REPO_SMOKE_POSTGRES_PORT:-55432}"
 DATABASE_URL="${LIVE_TEACHING_DATABASE_URL:-postgresql://card_in_repo:card_in_repo@127.0.0.1:${POSTGRES_PORT}/card_in_repo_live_smoke}"
 STARTED_POSTGRES=0
+VENV_DIR=""
 
 cleanup() {
   if [[ "$STARTED_POSTGRES" == "1" ]]; then
     docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   fi
+  if [[ -n "$VENV_DIR" && -d "$VENV_DIR" ]]; then
+    rm -rf "$VENV_DIR"
+  fi
 }
 trap cleanup EXIT
+
+command -v python3 >/dev/null 2>&1 || {
+  echo "python3 is required for the live teaching smoke" >&2
+  exit 1
+}
 
 if [[ -z "${LIVE_TEACHING_DATABASE_URL:-}" ]]; then
   command -v docker >/dev/null 2>&1 || {
@@ -54,10 +63,12 @@ fi
 export DATABASE_URL
 export TEACHING_SMOKE_LEVEL="${TEACHING_SMOKE_LEVEL:-all}"
 
-if [[ "$TEACHING_LLM_ENDPOINT" == http://127.0.0.1:* || "$TEACHING_LLM_ENDPOINT" == http://localhost:* || "$TEACHING_LLM_ENDPOINT" == http://\[::1\]:* ]]; then
-  : # loopback HTTP is allowed by the runtime without a private-network opt-in
-fi
-
-python3 -m pip install -e "$ROOT/packages/analyzer"
-python3 -m pip install -e "$ROOT/apps/api"
-python3 "$ROOT/apps/api/scripts/live_teaching_smoke.py"
+# Keep the proof path independent of the host Python installation. Homebrew and
+# other externally managed Python installs can reject direct pip writes (PEP 668),
+# and a smoke test should not mutate the developer's global environment anyway.
+VENV_DIR="$(mktemp -d "${TMPDIR:-/tmp}/card-in-repo-live-smoke.XXXXXX")"
+python3 -m venv "$VENV_DIR/venv"
+PYTHON="$VENV_DIR/venv/bin/python"
+"$PYTHON" -m pip install -e "$ROOT/packages/analyzer"
+"$PYTHON" -m pip install -e "$ROOT/apps/api"
+"$PYTHON" "$ROOT/apps/api/scripts/live_teaching_smoke.py"
